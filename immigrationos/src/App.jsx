@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 // ── CASE TYPES ────────────────────────────────────────────────────────────────
@@ -41,15 +41,19 @@ const TODAY = new Date();
 const daysUntil = d => Math.ceil((new Date(d) - TODAY) / 86400000);
 const fmtDate = d => d ? new Date(d).toLocaleDateString("pt-BR") : "—";
 const todayStr = () => new Date().toISOString().split("T")[0];
+const firstName = name => name ? name.split(" ")[0] : "—";
 const statusColors = { "Em Andamento": "#C8A96E", "Aguardando Cliente": "#7EAED4", "Aprovado": "#A8C5A0", "Em Revisão": "#E8A090", "Encerrado": "#6A5E52", "Arquivado": "#4A3E32" };
 const priorityColors = { Urgente: "#E07070", Alta: "#E8A090", Média: "#C8A96E", Baixa: "#A8C5A0" };
 
 // ── STYLES ────────────────────────────────────────────────────────────────────
 const I = { background: "#0F0D0A", border: "1px solid #3A3028", borderRadius: 8, padding: "10px 14px", color: "#E8E0D5", fontSize: 14, fontFamily: "'DM Sans',sans-serif", outline: "none", width: "100%", boxSizing: "border-box" };
-const B = (col="#C8A96E") => ({ background: col, color: col==="#C8A96E"?"#0F0D0A":"#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" });
-const G = (col="#C8A96E") => ({ background: "transparent", color: col, border: `1px solid ${col}44`, borderRadius: 8, padding: "8px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" });
+const Btn = (col="#C8A96E", outline=false) => outline
+  ? { background: "transparent", color: col, border: `1px solid ${col}44`, borderRadius: 8, padding: "8px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }
+  : { background: col, color: ["#C8A96E","#F0C060","#A8C5A0"].includes(col)?"#0F0D0A":"#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" };
 const L = { fontSize: 11, color: "#6A5E52", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" };
 const CARD = { background: "#1A1410", border: "1px solid #2A2218", borderRadius: 12, padding: 24 };
+const TH = { textAlign: "left", padding: "11px 14px", color: "#6A5E52", fontSize: 11, fontFamily: "monospace", letterSpacing: "0.1em", textTransform: "uppercase", borderBottom: "1px solid #2A2218" };
+const TD = { padding: "12px 14px", borderBottom: "1px solid #1E1A16", fontSize: 13, verticalAlign: "middle" };
 
 const Avatar = ({ user, size=32 }) => (
   <div style={{ width:size, height:size, borderRadius:"50%", background:user?.color||"#C8A96E", color:"#1A1410", display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.34, fontWeight:700, fontFamily:"monospace", flexShrink:0 }}>{user?.avatar||"?"}</div>
@@ -57,44 +61,123 @@ const Avatar = ({ user, size=32 }) => (
 const Badge = ({ label, color }) => (
   <span style={{ background:color+"22", color, border:`1px solid ${color}44`, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>
 );
-const DaysLeft = ({ date }) => {
+const DaysLeft = ({ date, warnAt=14 }) => {
   if (!date) return null;
   const d = daysUntil(date);
-  const c = d<=0?"#E07070":d<=7?"#E07070":d<=14?"#C8A96E":"#A8C5A0";
+  const c = d<=0?"#E07070":d<=7?"#E07070":d<=warnAt?"#C8A96E":"#A8C5A0";
   return <span style={{ color:c, fontSize:12, fontFamily:"monospace", fontWeight:700 }}>{d<=0?"VENCIDO":d===1?"amanhã":`${d}d`}</span>;
 };
 
-// ── MODAL BASE ────────────────────────────────────────────────────────────────
+// ── CONTROLLED INPUT (fixes lose-focus bug) ───────────────────────────────────
+const TextInput = ({ value, onChange, placeholder="", type="text", style={} }) => {
+  const ref = useRef(null);
+  return <input ref={ref} type={type} defaultValue={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ ...I, ...style }} />;
+};
+
+// Stable textarea that doesn't re-render on parent state change
+const StableTextarea = ({ value, onChange, placeholder="", style={} }) => {
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current && ref.current.value !== value) ref.current.value = value; }, []);
+  return <textarea ref={ref} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ ...I, minHeight:80, resize:"vertical", ...style }} defaultValue={value} />;
+};
+
 const Modal = ({ title, subtitle, onClose, children, maxWidth=560 }) => (
   <div style={{ position:"fixed", inset:0, background:"#0A0806ee", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
     <div style={{ background:"#1A1410", border:"1px solid #3A3028", borderRadius:16, padding:28, width:"100%", maxWidth, maxHeight:"92vh", overflowY:"auto" }}>
-      <h2 style={{ margin:"0 0 4px", fontSize:20, fontWeight:800 }}>{title}</h2>
+      {title && <h2 style={{ margin:"0 0 4px", fontSize:20, fontWeight:800 }}>{title}</h2>}
       {subtitle && <p style={{ margin:"0 0 20px", color:"#6A5E52", fontSize:13 }}>{subtitle}</p>}
       {children}
     </div>
   </div>
 );
 
-const Row = ({ children }) => <div style={{ display:"flex", gap:12, marginBottom:12 }}>{children}</div>;
-const Col = ({ children, style={} }) => <div style={{ flex:1, ...style }}>{children}</div>;
-const Field = ({ label, children }) => <div style={{ flex:1 }}><label style={L}>{label}</label>{children}</div>;
-const SecTitle = ({ children }) => <div style={{ fontSize:11, color:"#C8A96E", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:14, paddingBottom:8, borderBottom:"1px solid #2A2218" }}>{children}</div>;
-const TabBtn = ({ active, onClick, children }) => <button onClick={onClick} style={{ ...G(active?"#C8A96E":"#6A5E52"), fontSize:12, padding:"7px 14px", ...(active?{background:"#C8A96E22",borderColor:"#C8A96E"}:{}) }}>{children}</button>;
+const SecTitle = ({ children }) => (
+  <div style={{ fontSize:11, color:"#C8A96E", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:14, paddingBottom:8, borderBottom:"1px solid #2A2218" }}>{children}</div>
+);
+const TabBtn = ({ active, onClick, children }) => (
+  <button onClick={onClick} style={{ ...Btn(active?"#C8A96E":"#6A5E52",true), fontSize:12, padding:"7px 14px", ...(active?{background:"#C8A96E22",borderColor:"#C8A96E"}:{}) }}>{children}</button>
+);
+const NavItem = ({ active, onClick, icon, label, count }) => (
+  <div onClick={onClick} style={{ padding:"10px 20px", cursor:"pointer", background:active?"#C8A96E18":"transparent", borderLeft:active?"3px solid #C8A96E":"3px solid transparent", color:active?"#C8A96E":"#8A7E72", fontSize:14, fontWeight:active?600:400, display:"flex", alignItems:"center", gap:10 }}>
+    <span>{icon}</span><span>{label}</span>
+    {count!==undefined && <span style={{ marginLeft:"auto", background:"#2A2218", borderRadius:10, padding:"1px 7px", fontSize:11 }}>{count}</span>}
+  </div>
+);
+
+// ── EXPORT TO PDF / EXCEL ─────────────────────────────────────────────────────
+const exportToCSV = (data, filename) => {
+  if (!data.length) return;
+  const headers = Object.keys(data[0]);
+  const csv = [headers.join(","), ...data.map(row => headers.map(h => `"${(row[h]||"").toString().replace(/"/g,'""')}"`).join(","))].join("\n");
+  const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
+const exportToPDF = (title, rows) => {
+  const w = window.open("","_blank");
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
+    body{font-family:Arial,sans-serif;padding:32px;color:#1a1a1a;font-size:13px}
+    h1{font-size:22px;margin-bottom:4px;color:#8B6914}
+    p{color:#888;margin:0 0 24px}
+    table{width:100%;border-collapse:collapse}
+    th{background:#f5edd8;text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#8B6914;border-bottom:2px solid #C8A96E}
+    td{padding:10px 12px;border-bottom:1px solid #eee;vertical-align:top}
+    tr:nth-child(even){background:#fafafa}
+    @media print{body{padding:16px}}
+  </style></head><body>
+    <h1>ImmigrationOS — ${title}</h1>
+    <p>Gerado em ${new Date().toLocaleDateString("pt-BR",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p>
+    <table><thead><tr>${Object.keys(rows[0]||{}).map(h=>`<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${Object.values(r).map(v=>`<td>${v||"—"}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    <script>window.print();<\/script></body></html>`);
+  w.document.close();
+};
 
 // ── WORKFLOW TRACKER ──────────────────────────────────────────────────────────
-function WorkflowTracker({ caseType, currentStep, assignments={}, users=[], onStepChange, onAssign, notes=[], onAddNote, currentUser }) {
+function WorkflowTracker({ caseType, currentStep, assignments={}, users=[], notes=[], onStepChange, onAssign, onAddNote, onReorder, onAddStep }) {
   const config = CASE_TYPES[caseType];
-  if (!config) return null;
-  const pct = Math.round(((currentStep+1)/config.steps.length)*100);
+  const [customSteps, setCustomSteps] = useState(null);
   const [noteStep, setNoteStep] = useState(null);
-  const [noteText, setNoteText] = useState("");
+  const [noteVal, setNoteVal] = useState("");
+  const [addingStep, setAddingStep] = useState(false);
+  const [newStep, setNewStep] = useState("");
+  const noteRef = useRef(null);
 
-  const saveNote = async (step) => {
-    if (!noteText.trim()) return;
-    await onAddNote(`[Etapa ${step+1}] ${noteText}`);
-    setNoteText(""); setNoteStep(null);
+  const steps = customSteps || config?.steps || [];
+  const pct = steps.length ? Math.round(((currentStep+1)/steps.length)*100) : 0;
+
+  const moveStep = (idx, dir) => {
+    const arr = [...steps];
+    const target = idx + dir;
+    if (target < 0 || target >= arr.length) return;
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    setCustomSteps(arr);
+    onReorder && onReorder(arr);
   };
 
+  const addStep = () => {
+    if (!newStep.trim()) return;
+    const arr = [...steps, newStep.trim()];
+    setCustomSteps(arr);
+    onAddStep && onAddStep(arr);
+    setNewStep(""); setAddingStep(false);
+  };
+
+  const removeStep = idx => {
+    const arr = steps.filter((_,i)=>i!==idx);
+    setCustomSteps(arr);
+    onReorder && onReorder(arr);
+  };
+
+  const saveNote = async step => {
+    if (!noteVal.trim()) return;
+    await onAddNote(`[Etapa ${step+1}] ${noteVal}`);
+    setNoteVal(""); setNoteStep(null);
+  };
+
+  if (!config) return null;
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
@@ -105,184 +188,174 @@ function WorkflowTracker({ caseType, currentStep, assignments={}, users=[], onSt
       <div style={{ height:6, background:"#2A2218", borderRadius:3, marginBottom:20, overflow:"hidden" }}>
         <div style={{ height:"100%", background:config.color, width:`${pct}%`, borderRadius:3, transition:"width 0.4s" }}/>
       </div>
-      {config.steps.map((step, i) => {
+      {steps.map((step, i) => {
         const done = i < currentStep, active = i === currentStep;
-        const assignedUserId = assignments[i];
-        const assignedUser = users.find(u => u.id === assignedUserId);
-        const stepNotes = notes.filter(n => n.content.startsWith(`[Etapa ${i+1}]`));
+        const assignedUser = users.find(u => u.id === assignments[i]);
+        const stepNotes = notes.filter(n => n.content.includes(`[Etapa ${i+1}]`));
         return (
           <div key={i} style={{ marginBottom:6 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, background:active?config.color+"18":"transparent", border:active?`1px solid ${config.color}44`:"1px solid transparent" }}>
-              <div onClick={() => onStepChange(i)} style={{ width:24, height:24, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", background:done?"#A8C5A020":active?config.color+"33":"#1E1A16", border:`2px solid ${done?"#A8C5A0":active?config.color:"#2A2218"}`, fontSize:11, color:done?"#A8C5A0":active?config.color:"#4A3E32", cursor:"pointer" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 12px", borderRadius:8, background:active?config.color+"18":"transparent", border:active?`1px solid ${config.color}44`:"1px solid transparent" }}>
+              <div onClick={()=>onStepChange(i)} style={{ width:24, height:24, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", background:done?"#A8C5A020":active?config.color+"33":"#1E1A16", border:`2px solid ${done?"#A8C5A0":active?config.color:"#2A2218"}`, fontSize:11, color:done?"#A8C5A0":active?config.color:"#4A3E32", cursor:"pointer" }}>
                 {done?"✓":i+1}
               </div>
-              <span onClick={() => onStepChange(i)} style={{ fontSize:13, color:active?"#E8E0D5":done?"#4A4038":"#8A7E72", textDecoration:done?"line-through":"none", flex:1, cursor:"pointer" }}>{step}</span>
-              {assignedUser && <Avatar user={assignedUser} size={20}/>}
-              <select value={assignedUserId||""} onChange={e => onAssign(i, e.target.value?Number(e.target.value):null)} style={{ background:"#0F0D0A", border:"1px solid #2A2218", borderRadius:6, padding:"3px 8px", color:"#8A7E72", fontSize:11, outline:"none" }}>
-                <option value="">Assignar...</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name.split(" ")[0]}</option>)}
-              </select>
-              <button onClick={() => setNoteStep(noteStep===i?null:i)} style={{ background:"transparent", border:"none", color:"#6A5E52", cursor:"pointer", fontSize:14, padding:"0 4px" }}>📝</button>
+              <span onClick={()=>onStepChange(i)} style={{ fontSize:13, color:active?"#E8E0D5":done?"#4A4038":"#8A7E72", textDecoration:done?"line-through":"none", flex:1, cursor:"pointer" }}>{step}</span>
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <button onClick={()=>moveStep(i,-1)} disabled={i===0} style={{ background:"transparent", border:"none", color:"#4A3E32", cursor:i===0?"not-allowed":"pointer", fontSize:12, padding:"2px 4px" }}>↑</button>
+                <button onClick={()=>moveStep(i,1)} disabled={i===steps.length-1} style={{ background:"transparent", border:"none", color:"#4A3E32", cursor:i===steps.length-1?"not-allowed":"pointer", fontSize:12, padding:"2px 4px" }}>↓</button>
+                <select value={assignments[i]||""} onChange={e=>onAssign(i,e.target.value?Number(e.target.value):null)} style={{ background:"#0F0D0A", border:"1px solid #2A2218", borderRadius:6, padding:"3px 6px", color:"#8A7E72", fontSize:11, outline:"none" }}>
+                  <option value="">Assignar...</option>
+                  {users.map(u=><option key={u.id} value={u.id}>{firstName(u.name)}</option>)}
+                </select>
+                {assignedUser && <Avatar user={assignedUser} size={18}/>}
+                <button onClick={()=>{setNoteStep(noteStep===i?null:i);setNoteVal("");}} style={{ background:"transparent", border:"none", color:"#6A5E52", cursor:"pointer", fontSize:13, padding:"0 2px" }}>📝</button>
+                <button onClick={()=>removeStep(i)} style={{ background:"transparent", border:"none", color:"#4A3E32", cursor:"pointer", fontSize:12, padding:"0 2px" }}>✕</button>
+              </div>
               {active && <span style={{ fontSize:10, color:config.color, fontWeight:700 }}>ATUAL</span>}
             </div>
             {stepNotes.length > 0 && (
-              <div style={{ marginLeft:46, marginTop:4 }}>
-                {stepNotes.map((n,ni) => <div key={ni} style={{ fontSize:11, color:"#8A7E72", padding:"4px 10px", background:"#0F0D0A", borderRadius:6, marginBottom:2, borderLeft:"2px solid #C8A96E44" }}>{n.content.replace(`[Etapa ${i+1}] `,"")}</div>)}
+              <div style={{ marginLeft:44 }}>
+                {stepNotes.map((n,ni)=><div key={ni} style={{ fontSize:11, color:"#8A7E72", padding:"4px 10px", background:"#0F0D0A", borderRadius:6, marginBottom:2, borderLeft:"2px solid #C8A96E44" }}>{n.content.replace(`[Etapa ${i+1}] `,"")}</div>)}
               </div>
             )}
-            {noteStep === i && (
-              <div style={{ marginLeft:46, marginTop:6, display:"flex", gap:8 }}>
-                <input style={{ ...I, fontSize:12, padding:"7px 10px" }} placeholder="Nota sobre esta etapa..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key==="Enter"&&saveNote(i)} autoFocus/>
-                <button style={{ ...B(), fontSize:12, padding:"7px 14px" }} onClick={() => saveNote(i)}>+</button>
+            {noteStep===i && (
+              <div style={{ marginLeft:44, marginTop:6, display:"flex", gap:8 }}>
+                <input ref={noteRef} type="text" defaultValue={noteVal} onChange={e=>setNoteVal(e.target.value)} placeholder="Nota sobre esta etapa..." onKeyDown={e=>e.key==="Enter"&&saveNote(i)} style={{ ...I, fontSize:12, padding:"7px 10px" }} autoFocus/>
+                <button style={{ ...Btn(), fontSize:12, padding:"7px 12px" }} onClick={()=>saveNote(i)}>+</button>
               </div>
             )}
           </div>
         );
       })}
+      {addingStep ? (
+        <div style={{ display:"flex", gap:8, marginTop:10 }}>
+          <input type="text" defaultValue={newStep} onChange={e=>setNewStep(e.target.value)} placeholder="Nome da nova etapa..." onKeyDown={e=>e.key==="Enter"&&addStep()} style={{ ...I, fontSize:12 }} autoFocus/>
+          <button style={{ ...Btn(), fontSize:12, padding:"7px 12px" }} onClick={addStep}>+ Adicionar</button>
+          <button style={{ ...Btn("#6A5E52",true), fontSize:12, padding:"7px 12px" }} onClick={()=>setAddingStep(false)}>✕</button>
+        </div>
+      ) : (
+        <button style={{ ...Btn("#6A5E52",true), fontSize:12, marginTop:10 }} onClick={()=>setAddingStep(true)}>+ Nova Etapa</button>
+      )}
+      <div style={{ display:"flex", gap:10, marginTop:16 }}>
+        <button style={{ ...Btn("#C8A96E",true), fontSize:12 }} disabled={!currentStep} onClick={()=>onStepChange(Math.max(0,currentStep-1))}>← Anterior</button>
+        <button style={{ ...Btn(), fontSize:12 }} disabled={currentStep>=(steps.length-1)} onClick={()=>onStepChange(Math.min(steps.length-1,currentStep+1))}>Próxima Etapa →</button>
+      </div>
     </div>
   );
 }
 
-// ── NEW/EDIT CASE MODAL ───────────────────────────────────────────────────────
+// ── CASE FORM MODAL ───────────────────────────────────────────────────────────
 function CaseFormModal({ users, initial={}, onSave, onClose, title="Novo Caso" }) {
-  const [clientName, setClientName] = useState(initial.client_name||"");
-  const [alienNumber, setAlienNumber] = useState(initial.alien_number||"");
-  const [dob, setDob] = useState(initial.dob||"");
-  const [nationality, setNationality] = useState(initial.nationality||"");
-  const [passportNumber, setPassportNumber] = useState(initial.passport_number||"");
-  const [usEntryDate, setUsEntryDate] = useState(initial.us_entry_date||"");
-  const [eadDate, setEadDate] = useState(initial.ead_eligibility_date||"");
-  const [address, setAddress] = useState(initial.address||"");
-  const [phone, setPhone] = useState(initial.phone||"");
-  const [email, setEmail] = useState(initial.email||"");
-  const [caseType, setCaseType] = useState(initial.case_type||"EB-2 NIW");
-  const [attorneyId, setAttorneyId] = useState(initial.attorney_id?String(initial.attorney_id):"");
-  const [priority, setPriority] = useState(initial.priority||"Média");
-  const [deadline, setDeadline] = useState(initial.deadline||"");
-  const [hearingDate, setHearingDate] = useState(initial.hearing_date||"");
-  const [masterHearing, setMasterHearing] = useState(initial.master_hearing_date||"");
-  const [individualHearing, setIndividualHearing] = useState(initial.individual_hearing_date||"");
-  const [interviewDate, setInterviewDate] = useState(initial.interview_date||"");
+  const [form, setForm] = useState({
+    clientName: initial.client_name||"", alienNumber: initial.alien_number||"",
+    dob: initial.dob||"", nationality: initial.nationality||"",
+    passportNumber: initial.passport_number||"", usEntryDate: initial.us_entry_date||"",
+    eadDate: initial.ead_eligibility_date||"", address: initial.address||"",
+    phone: initial.phone||"", email: initial.email||"",
+    caseType: initial.case_type||"EB-2 NIW", attorneyId: initial.attorney_id?String(initial.attorney_id):"",
+    priority: initial.priority||"Média", deadline: initial.deadline||"",
+    masterHearing: initial.master_hearing_date||"", individualHearing: initial.individual_hearing_date||"",
+    interviewDate: initial.interview_date||"",
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const attorneys = users.filter(u => u.is_attorney);
+  const attorneys = users.filter(u=>u.is_attorney);
+  useEffect(()=>{ if (attorneys.length===1&&!form.attorneyId) setForm(p=>({...p,attorneyId:String(attorneys[0].id)})); },[]);
 
-  useEffect(() => { if (attorneys.length===1 && !attorneyId) setAttorneyId(String(attorneys[0].id)); }, []);
+  const set = k => v => setForm(p=>({...p,[k]:v}));
+  const setE = k => e => setForm(p=>({...p,[k]:e.target.value}));
+
+  const Row = ({children}) => <div style={{display:"flex",gap:12,marginBottom:12}}>{children}</div>;
+  const F = ({label,children}) => <div style={{flex:1}}><label style={L}>{label}</label>{children}</div>;
 
   const handleSave = async () => {
-    if (!clientName.trim()) { setError("❌ Nome do cliente é obrigatório."); return; }
-    if (!attorneyId) { setError("❌ Selecione um advogado responsável."); return; }
+    if (!form.clientName.trim()) { setError("❌ Nome do cliente é obrigatório."); return; }
+    if (!form.attorneyId) { setError("❌ Selecione um advogado responsável."); return; }
     setError(""); setSaving(true);
-    await onSave({ clientName, alienNumber, dob, nationality, passportNumber, usEntryDate, eadDate, address, phone, email, caseType, attorneyId, priority, deadline, hearingDate, masterHearing, individualHearing, interviewDate });
+    await onSave(form);
     setSaving(false);
   };
 
   return (
     <Modal title={title} onClose={onClose} maxWidth={660}>
       <SecTitle>Dados do Caso</SecTitle>
-      <div style={{ marginBottom:12 }}>
-        <label style={L}>Tipo de Caso *</label>
-        <select value={caseType} onChange={e=>setCaseType(e.target.value)} style={I}>
-          {CASE_TYPE_NAMES.map(v=><option key={v}>{v}</option>)}
-        </select>
+      <div style={{marginBottom:12}}><label style={L}>Tipo de Caso *</label>
+        <select value={form.caseType} onChange={setE("caseType")} style={I}>{CASE_TYPE_NAMES.map(v=><option key={v}>{v}</option>)}</select>
       </div>
       <Row>
-        <Field label="Advogado Responsável *">
-          <select value={attorneyId} onChange={e=>setAttorneyId(e.target.value)} style={I}>
-            <option value="">Selecionar advogado...</option>
-            {attorneys.map(u=><option key={u.id} value={String(u.id)}>{u.name}</option>)}
+        <F label="Advogado Responsável *">
+          <select value={form.attorneyId} onChange={setE("attorneyId")} style={I}>
+            <option value="">Selecionar...</option>
+            {attorneys.map(u=><option key={u.id} value={String(u.id)}>{firstName(u.name)}</option>)}
           </select>
-        </Field>
-        <Field label="Prioridade">
-          <select value={priority} onChange={e=>setPriority(e.target.value)} style={I}>
-            {["Urgente","Alta","Média","Baixa"].map(p=><option key={p}>{p}</option>)}
-          </select>
-        </Field>
+        </F>
+        <F label="Prioridade">
+          <select value={form.priority} onChange={setE("priority")} style={I}>{["Urgente","Alta","Média","Baixa"].map(p=><option key={p}>{p}</option>)}</select>
+        </F>
       </Row>
       <Row>
-        <Field label="Prazo Final (opcional)"><input type="date" value={deadline} onChange={e=>setDeadline(e.target.value)} style={I}/></Field>
-        <Field label="Master Hearing (opcional)"><input type="date" value={masterHearing} onChange={e=>setMasterHearing(e.target.value)} style={I}/></Field>
+        <F label="Prazo Final (opcional)"><input type="date" value={form.deadline} onChange={setE("deadline")} style={I}/></F>
+        <F label="Master Hearing"><input type="date" value={form.masterHearing} onChange={setE("masterHearing")} style={I}/></F>
       </Row>
       <Row>
-        <Field label="Individual Hearing (opcional)"><input type="date" value={individualHearing} onChange={e=>setIndividualHearing(e.target.value)} style={I}/></Field>
-        <Field label="Interview USCIS (opcional)"><input type="date" value={interviewDate} onChange={e=>setInterviewDate(e.target.value)} style={I}/></Field>
+        <F label="Individual Hearing"><input type="date" value={form.individualHearing} onChange={setE("individualHearing")} style={I}/></F>
+        <F label="Interview USCIS"><input type="date" value={form.interviewDate} onChange={setE("interviewDate")} style={I}/></F>
       </Row>
-      <div style={{ marginTop:20, marginBottom:14 }}><SecTitle>Dados do Cliente</SecTitle></div>
-      <div style={{ marginBottom:12 }}>
-        <label style={L}>Nome Completo *</label>
-        <input type="text" value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="Nome completo do cliente" style={I}/>
+      <div style={{marginTop:20,marginBottom:14}}><SecTitle>Dados do Cliente</SecTitle></div>
+      <div style={{marginBottom:12}}><label style={L}>Nome Completo *</label>
+        <input type="text" value={form.clientName} onChange={setE("clientName")} placeholder="Nome completo do cliente" style={I}/>
       </div>
       <Row>
-        <Field label="A# (Alien Number)"><input type="text" value={alienNumber} onChange={e=>setAlienNumber(e.target.value)} placeholder="A000-000-000" style={I}/></Field>
-        <Field label="Data de Nascimento"><input type="date" value={dob} onChange={e=>setDob(e.target.value)} style={I}/></Field>
+        <F label="A# (Alien Number)"><input type="text" value={form.alienNumber} onChange={setE("alienNumber")} placeholder="A000-000-000" style={I}/></F>
+        <F label="Data de Nascimento"><input type="date" value={form.dob} onChange={setE("dob")} style={I}/></F>
       </Row>
       <Row>
-        <Field label="Nacionalidade"><input type="text" value={nationality} onChange={e=>setNationality(e.target.value)} placeholder="Ex: Brasil" style={I}/></Field>
-        <Field label="Número do Passaporte"><input type="text" value={passportNumber} onChange={e=>setPassportNumber(e.target.value)} placeholder="Ex: BR123456" style={I}/></Field>
+        <F label="Nacionalidade"><input type="text" value={form.nationality} onChange={setE("nationality")} placeholder="Ex: Brasil" style={I}/></F>
+        <F label="Número do Passaporte"><input type="text" value={form.passportNumber} onChange={setE("passportNumber")} placeholder="Ex: BR123456" style={I}/></F>
       </Row>
       <Row>
-        <Field label="Data de Entrada nos EUA"><input type="date" value={usEntryDate} onChange={e=>setUsEntryDate(e.target.value)} style={I}/></Field>
-        <Field label="Elegibilidade EAD"><input type="date" value={eadDate} onChange={e=>setEadDate(e.target.value)} style={I}/></Field>
+        <F label="Data de Entrada nos EUA"><input type="date" value={form.usEntryDate} onChange={setE("usEntryDate")} style={I}/></F>
+        <F label="Elegibilidade EAD"><input type="date" value={form.eadDate} onChange={setE("eadDate")} style={I}/></F>
       </Row>
-      <div style={{ marginBottom:12 }}>
-        <label style={L}>Endereço Completo</label>
-        <input type="text" value={address} onChange={e=>setAddress(e.target.value)} placeholder="Rua, número, cidade, estado, ZIP" style={I}/>
+      <div style={{marginBottom:12}}><label style={L}>Endereço Completo</label>
+        <input type="text" value={form.address} onChange={setE("address")} placeholder="Rua, número, cidade, estado, ZIP" style={I}/>
       </div>
       <Row>
-        <Field label="Telefone"><input type="text" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(000) 000-0000" style={I}/></Field>
-        <Field label="Email"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="cliente@email.com" style={I}/></Field>
+        <F label="Telefone"><input type="text" value={form.phone} onChange={setE("phone")} placeholder="(000) 000-0000" style={I}/></F>
+        <F label="Email"><input type="email" value={form.email} onChange={setE("email")} placeholder="cliente@email.com" style={I}/></F>
       </Row>
-      {error && <div style={{ background:"#E0707022", border:"1px solid #E07070", borderRadius:8, padding:"10px 14px", color:"#E07070", fontSize:13, marginBottom:14 }}>{error}</div>}
-      <div style={{ display:"flex", gap:10 }}>
-        <button style={{ ...B(), flex:1 }} onClick={handleSave} disabled={saving}>{saving?"Salvando...":"✓ Salvar Caso"}</button>
-        <button style={{ ...G(), flex:1 }} onClick={onClose}>Cancelar</button>
+      {error && <div style={{background:"#E0707022",border:"1px solid #E07070",borderRadius:8,padding:"10px 14px",color:"#E07070",fontSize:13,marginBottom:14}}>{error}</div>}
+      <div style={{display:"flex",gap:10}}>
+        <button style={{...Btn(),flex:1}} onClick={handleSave} disabled={saving}>{saving?"Salvando...":"✓ Salvar"}</button>
+        <button style={{...Btn("#6A5E52",true),flex:1}} onClick={onClose}>Cancelar</button>
       </div>
     </Modal>
   );
 }
 
-// ── ADD TEAM MEMBER MODAL ─────────────────────────────────────────────────────
+// ── TEAM MEMBER MODAL ─────────────────────────────────────────────────────────
 function TeamMemberModal({ onSave, onClose }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("Paralegal");
-  const [isAttorney, setIsAttorney] = useState(false);
-  const [color, setColor] = useState(USER_COLORS[2]);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { setIsAttorney(role==="Advogado(a)"); }, [role]);
-
+  const [name, setName] = useState(""); const [email, setEmail] = useState("");
+  const [role, setRole] = useState("Paralegal"); const [color, setColor] = useState(USER_COLORS[2]);
+  const isAttorney = role==="Advogado(a)";
   const initials = name.split(" ").filter(Boolean).map(w=>w[0]).join("").substring(0,2).toUpperCase();
-
-  const handleSave = async () => {
-    if (!name.trim() || !email.trim()) return;
-    setSaving(true);
-    await onSave({ name, email, role, is_attorney: isAttorney, color, avatar: initials||"??" });
-    setSaving(false);
-  };
-
   return (
     <Modal title="Adicionar Membro da Equipe" onClose={onClose} maxWidth={440}>
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <div><label style={L}>Nome Completo *</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Nome completo" style={I}/></div>
         <div><label style={L}>Email *</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@escritorio.com" style={I}/></div>
-        <div>
-          <label style={L}>Função</label>
-          <select value={role} onChange={e=>setRole(e.target.value)} style={I}>
-            {ROLES.map(r=><option key={r}>{r}</option>)}
-          </select>
+        <div><label style={L}>Função</label>
+          <select value={role} onChange={e=>setRole(e.target.value)} style={I}>{ROLES.map(r=><option key={r}>{r}</option>)}</select>
         </div>
-        <div>
-          <label style={L}>Cor do Avatar</label>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        <div><label style={L}>Cor do Avatar</label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {USER_COLORS.map(c=>(
-              <div key={c} onClick={()=>setColor(c)} style={{ width:32, height:32, borderRadius:"50%", background:c, cursor:"pointer", border:color===c?"3px solid #fff":"3px solid transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#1A1410" }}>{initials||"?"}</div>
+              <div key={c} onClick={()=>setColor(c)} style={{width:32,height:32,borderRadius:"50%",background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#1A1410"}}>{initials||"?"}</div>
             ))}
           </div>
         </div>
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <button style={{ ...B(), flex:1 }} onClick={handleSave} disabled={saving}>{saving?"Salvando...":"Adicionar"}</button>
-          <button style={{ ...G(), flex:1 }} onClick={onClose}>Cancelar</button>
+        <div style={{display:"flex",gap:10,marginTop:8}}>
+          <button style={{...Btn(),flex:1}} onClick={async()=>{if(!name.trim()||!email.trim())return;await onSave({name,email,role,is_attorney:isAttorney,color,avatar:initials||"??"});}}>Adicionar</button>
+          <button style={{...Btn("#6A5E52",true),flex:1}} onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </Modal>
@@ -291,32 +364,23 @@ function TeamMemberModal({ onSave, onClose }) {
 
 // ── FAMILY MODAL ──────────────────────────────────────────────────────────────
 function FamilyModal({ onSave, onClose, initial={} }) {
-  const [name, setName] = useState(initial.name||"");
-  const [relationship, setRelationship] = useState(initial.relationship||"Cônjuge");
-  const [dob, setDob] = useState(initial.dob||"");
-  const [alienNumber, setAlienNumber] = useState(initial.alien_number||"");
-  const [nationality, setNationality] = useState(initial.nationality||"");
-  const [passportNumber, setPassportNumber] = useState(initial.passport_number||"");
-  const [notes, setNotes] = useState(initial.notes||"");
-  const [saving, setSaving] = useState(false);
-
+  const [form, setForm] = useState({ name:initial.name||"", relationship:initial.relationship||"Cônjuge", dob:initial.dob||"", alienNumber:initial.alien_number||"", nationality:initial.nationality||"", passportNumber:initial.passport_number||"", notes:initial.notes||"" });
+  const setE = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const Row = ({children})=><div style={{display:"flex",gap:12,marginBottom:12}}>{children}</div>;
+  const F = ({label,children})=><div style={{flex:1}}><label style={L}>{label}</label>{children}</div>;
   return (
     <Modal title={initial.id?"Editar Familiar":"Adicionar Familiar"} onClose={onClose} maxWidth={500}>
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        <div><label style={L}>Nome Completo *</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Nome do familiar" style={I}/></div>
-        <Row>
-          <Field label="Parentesco"><select value={relationship} onChange={e=>setRelationship(e.target.value)} style={I}>{RELATIONSHIPS.map(r=><option key={r}>{r}</option>)}</select></Field>
-          <Field label="Data de Nascimento"><input type="date" value={dob} onChange={e=>setDob(e.target.value)} style={I}/></Field>
-        </Row>
-        <Row>
-          <Field label="A# (Alien Number)"><input type="text" value={alienNumber} onChange={e=>setAlienNumber(e.target.value)} placeholder="A000-000-000" style={I}/></Field>
-          <Field label="Nacionalidade"><input type="text" value={nationality} onChange={e=>setNationality(e.target.value)} placeholder="Ex: Brasil" style={I}/></Field>
-        </Row>
-        <div><label style={L}>Número do Passaporte</label><input type="text" value={passportNumber} onChange={e=>setPassportNumber(e.target.value)} style={I}/></div>
-        <div><label style={L}>Observações</label><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Informações adicionais..." style={{ ...I, minHeight:60, resize:"vertical" }}/></div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button style={{ ...B(), flex:1 }} onClick={async()=>{if(!name.trim())return;setSaving(true);await onSave({name,relationship,dob:dob||null,alien_number:alienNumber||null,nationality:nationality||null,passport_number:passportNumber||null,notes:notes||null});setSaving(false);}} disabled={saving}>{saving?"Salvando...":"Salvar"}</button>
-          <button style={{ ...G(), flex:1 }} onClick={onClose}>Cancelar</button>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div><label style={L}>Nome Completo *</label><input type="text" value={form.name} onChange={setE("name")} placeholder="Nome do familiar" style={I}/></div>
+        <Row><F label="Parentesco"><select value={form.relationship} onChange={setE("relationship")} style={I}>{RELATIONSHIPS.map(r=><option key={r}>{r}</option>)}</select></F>
+          <F label="Data de Nascimento"><input type="date" value={form.dob} onChange={setE("dob")} style={I}/></F></Row>
+        <Row><F label="A# (Alien Number)"><input type="text" value={form.alienNumber} onChange={setE("alienNumber")} placeholder="A000-000-000" style={I}/></F>
+          <F label="Nacionalidade"><input type="text" value={form.nationality} onChange={setE("nationality")} placeholder="Ex: Brasil" style={I}/></F></Row>
+        <div><label style={L}>Passaporte</label><input type="text" value={form.passportNumber} onChange={setE("passportNumber")} style={I}/></div>
+        <div><label style={L}>Observações</label><textarea value={form.notes} onChange={setE("notes")} placeholder="Informações adicionais..." style={{...I,minHeight:60,resize:"vertical"}}/></div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={{...Btn(),flex:1}} onClick={async()=>{if(!form.name.trim())return;await onSave({name:form.name,relationship:form.relationship,dob:form.dob||null,alien_number:form.alienNumber||null,nationality:form.nationality||null,passport_number:form.passportNumber||null,notes:form.notes||null});}}>Salvar</button>
+          <button style={{...Btn("#6A5E52",true),flex:1}} onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </Modal>
@@ -324,37 +388,32 @@ function FamilyModal({ onSave, onClose, initial={} }) {
 }
 
 // ── DEADLINE MODAL ────────────────────────────────────────────────────────────
-function DeadlineModal({ users, onSave, onClose, initial={} }) {
-  const [type, setType] = useState(initial.deadline_type||DEADLINE_TYPES[0]);
-  const [detail, setDetail] = useState(initial.deadline_detail||"");
-  const [dueDate, setDueDate] = useState(initial.due_date||"");
-  const [assignedTo, setAssignedTo] = useState(initial.assigned_to||"");
-  const [saving, setSaving] = useState(false);
-
+function DeadlineModal({ users, onSave, onClose }) {
+  const [type, setType] = useState(DEADLINE_TYPES[0]);
+  const [detail, setDetail] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
   return (
-    <Modal title="Prazo Urgente" onClose={onClose} maxWidth={480}>
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        <div>
-          <label style={L}>Tipo de Prazo *</label>
-          <select value={type} onChange={e=>setType(e.target.value)} style={I}>
-            {DEADLINE_TYPES.map(d=><option key={d}>{d}</option>)}
-          </select>
+    <Modal title="Adicionar Prazo Urgente" onClose={onClose} maxWidth={480}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div><label style={L}>Tipo de Prazo *</label>
+          <select value={type} onChange={e=>setType(e.target.value)} style={I}>{DEADLINE_TYPES.map(d=><option key={d}>{d}</option>)}</select>
         </div>
-        {(type==="Motion (especificar)"||type==="Outro prazo") && (
+        {(type==="Motion (especificar)"||type==="Outro prazo")&&(
           <div><label style={L}>Detalhe</label><input type="text" value={detail} onChange={e=>setDetail(e.target.value)} placeholder="Especifique..." style={I}/></div>
         )}
-        <Row>
-          <Field label="Data do Prazo *"><input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} style={I}/></Field>
-          <Field label="Responsável">
+        <div style={{display:"flex",gap:12}}>
+          <div style={{flex:1}}><label style={L}>Data do Prazo *</label><input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} style={I}/></div>
+          <div style={{flex:1}}><label style={L}>Responsável</label>
             <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)} style={I}>
               <option value="">Selecionar...</option>
-              {users.map(u=><option key={u.id} value={u.id}>{u.name.split(" ")[0]}</option>)}
+              {users.map(u=><option key={u.id} value={u.id}>{firstName(u.name)}</option>)}
             </select>
-          </Field>
-        </Row>
-        <div style={{ display:"flex", gap:10, marginTop:4 }}>
-          <button style={{ ...B(), flex:1 }} onClick={async()=>{if(!dueDate)return;setSaving(true);await onSave({deadline_type:type,deadline_detail:detail||null,due_date:dueDate,assigned_to:assignedTo?Number(assignedTo):null,done:false});setSaving(false);}} disabled={saving}>{saving?"Salvando...":"Salvar Prazo"}</button>
-          <button style={{ ...G(), flex:1 }} onClick={onClose}>Cancelar</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:4}}>
+          <button style={{...Btn(),flex:1}} onClick={async()=>{if(!dueDate)return;await onSave({deadline_type:type,deadline_detail:detail||null,due_date:dueDate,assigned_to:assignedTo?Number(assignedTo):null,done:false});}}>Salvar Prazo</button>
+          <button style={{...Btn("#6A5E52",true),flex:1}} onClick={onClose}>Cancelar</button>
         </div>
       </div>
     </Modal>
@@ -362,88 +421,106 @@ function DeadlineModal({ users, onSave, onClose, initial={} }) {
 }
 
 // ── REPORTS MODAL ─────────────────────────────────────────────────────────────
-function ReportsModal({ cases, users, tasks, deadlines, onClose, onOpenCase }) {
-  const [reportType, setReportType] = useState("hearings");
-
-  const upcoming = (arr, dateField) => arr.filter(c=>c[dateField]).sort((a,b)=>new Date(a[dateField])-new Date(b[dateField]));
-  const masterHearings = upcoming(cases.filter(c=>c.master_hearing_date&&!["Encerrado","Arquivado"].includes(c.status)), "master_hearing_date");
-  const individualHearings = upcoming(cases.filter(c=>c.individual_hearing_date&&!["Encerrado","Arquivado"].includes(c.status)), "individual_hearing_date");
-  const interviews = upcoming(cases.filter(c=>c.interview_date&&!["Encerrado","Arquivado"].includes(c.status)), "interview_date");
-  const urgentDeadlines = deadlines.filter(d=>!d.done&&d.due_date&&daysUntil(d.due_date)<=30).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
-
-  const byStep = CASE_TYPE_NAMES.reduce((acc,type)=>{
+function ReportsModal({ cases, users, deadlines, onClose, onOpenCase }) {
+  const [tab, setTab] = useState("hearings");
+  const activeCases = cases.filter(c=>!["Encerrado","Arquivado"].includes(c.status));
+  const masterHearings = activeCases.filter(c=>c.master_hearing_date).sort((a,b)=>new Date(a.master_hearing_date)-new Date(b.master_hearing_date));
+  const individualHearings = activeCases.filter(c=>c.individual_hearing_date).sort((a,b)=>new Date(a.individual_hearing_date)-new Date(b.individual_hearing_date));
+  const interviews = activeCases.filter(c=>c.interview_date).sort((a,b)=>new Date(a.interview_date)-new Date(b.interview_date));
+  const urgentDeadlines = deadlines.filter(d=>!d.done&&d.due_date&&daysUntil(d.due_date)<=60).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
+  const byStep = {};
+  CASE_TYPE_NAMES.forEach(type=>{
     const cfg = CASE_TYPES[type];
     cfg.steps.forEach((step,i)=>{
-      const matching = cases.filter(c=>c.case_type===type&&c.current_step===i&&!["Encerrado","Arquivado"].includes(c.status));
-      if (matching.length>0) { if (!acc[step]) acc[step]=[]; acc[step].push(...matching.map(c=>({...c,stepLabel:step}))); }
+      const matching = activeCases.filter(c=>c.case_type===type&&c.current_step===i);
+      if (matching.length>0) { if (!byStep[step]) byStep[step]=[]; byStep[step].push(...matching); }
     });
-    return acc;
-  },{});
+  });
 
-  const CaseRow = ({ c }) => {
+  const CRow = ({c,dateField,dateLabel}) => {
     const atty = users.find(u=>u.id===c.attorney_id);
     return (
-      <div onClick={()=>{onOpenCase(c.id);onClose();}} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", background:"#0F0D0A", borderRadius:8, marginBottom:6, cursor:"pointer" }}>
-        <span style={{ fontSize:16 }}>{CASE_TYPES[c.case_type]?.icon}</span>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:13, fontWeight:700 }}>{c.client_name}</div>
-          <div style={{ fontSize:11, color:"#6A5E52" }}>{c.case_type} · {atty?.name.split(" ")[0]}</div>
+      <div onClick={()=>{onOpenCase(c.id);onClose();}} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"#0F0D0A",borderRadius:8,marginBottom:6,cursor:"pointer"}}>
+        <span style={{fontSize:16}}>{CASE_TYPES[c.case_type]?.icon}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700}}>{c.client_name}</div>
+          <div style={{fontSize:11,color:"#6A5E52"}}>{c.case_type} · {firstName(atty?.name)}</div>
         </div>
-        {c.master_hearing_date&&reportType==="hearings"&&<div style={{ textAlign:"right" }}><div style={{ fontSize:11, color:"#7EAED4" }}>Master: {fmtDate(c.master_hearing_date)}</div><DaysLeft date={c.master_hearing_date}/></div>}
-        {c.individual_hearing_date&&reportType==="hearings"&&<div style={{ textAlign:"right" }}><div style={{ fontSize:11, color:"#E8A090" }}>Individual: {fmtDate(c.individual_hearing_date)}</div><DaysLeft date={c.individual_hearing_date}/></div>}
-        {c.interview_date&&reportType==="hearings"&&<div style={{ textAlign:"right" }}><div style={{ fontSize:11, color:"#A8C5A0" }}>Interview: {fmtDate(c.interview_date)}</div><DaysLeft date={c.interview_date}/></div>}
+        {dateLabel&&<Badge label={dateLabel} color="#7EAED4"/>}
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:11,color:"#A8C5A0"}}>{fmtDate(c[dateField])}</div>
+          <DaysLeft date={c[dateField]} warnAt={dateField==="individual_hearing_date"?90:60}/>
+        </div>
       </div>
     );
   };
 
+  const exportHearings = () => {
+    const rows = [...masterHearings.map(c=>({Cliente:c.client_name,"Tipo de Caso":c.case_type,"Tipo Audiência":"Master Hearing","Data":fmtDate(c.master_hearing_date),"Dias Restantes":daysUntil(c.master_hearing_date)})),
+      ...individualHearings.map(c=>({Cliente:c.client_name,"Tipo de Caso":c.case_type,"Tipo Audiência":"Individual Hearing","Data":fmtDate(c.individual_hearing_date),"Dias Restantes":daysUntil(c.individual_hearing_date)})),
+      ...interviews.map(c=>({Cliente:c.client_name,"Tipo de Caso":c.case_type,"Tipo Audiência":"Interview USCIS","Data":fmtDate(c.interview_date),"Dias Restantes":daysUntil(c.interview_date)}))];
+    return rows;
+  };
+
   return (
-    <Modal title="📊 Relatórios" onClose={onClose} maxWidth={700}>
-      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
-        {[["hearings","🏛️ Audiências"],["deadlines","⚠️ Prazos"],["bystep","📋 Por Etapa"]].map(([k,l])=>(
-          <TabBtn key={k} active={reportType===k} onClick={()=>setReportType(k)}>{l}</TabBtn>
-        ))}
-      </div>
-
-      {reportType==="hearings" && (
-        <div>
-          {masterHearings.length>0&&<><div style={{ fontSize:12, color:"#7EAED4", fontWeight:700, marginBottom:8, textTransform:"uppercase", letterSpacing:"0.08em" }}>Master Hearings</div>{masterHearings.map(c=><CaseRow key={c.id+"-m"} c={c}/>)}</>}
-          {individualHearings.length>0&&<><div style={{ fontSize:12, color:"#E8A090", fontWeight:700, marginBottom:8, marginTop:16, textTransform:"uppercase", letterSpacing:"0.08em" }}>Individual Hearings</div>{individualHearings.map(c=><CaseRow key={c.id+"-i"} c={c}/>)}</>}
-          {interviews.length>0&&<><div style={{ fontSize:12, color:"#A8C5A0", fontWeight:700, marginBottom:8, marginTop:16, textTransform:"uppercase", letterSpacing:"0.08em" }}>Interviews USCIS</div>{interviews.map(c=><CaseRow key={c.id+"-int"} c={c}/>)}</>}
-          {masterHearings.length===0&&individualHearings.length===0&&interviews.length===0&&<p style={{ color:"#4A3E32" }}>Nenhuma audiência agendada.</p>}
-        </div>
-      )}
-
-      {reportType==="deadlines" && (
-        <div>
-          {urgentDeadlines.length===0&&<p style={{ color:"#4A3E32" }}>Nenhum prazo urgente nos próximos 30 dias.</p>}
-          {urgentDeadlines.map(d=>{
-            const c = cases.find(x=>x.id===d.case_id);
-            const u = users.find(x=>x.id===d.assigned_to);
-            return (
-              <div key={d.id} onClick={()=>{if(c){onOpenCase(c.id);onClose();}}} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", background:"#0F0D0A", borderRadius:8, marginBottom:6, cursor:"pointer" }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:700 }}>{d.deadline_type}{d.deadline_detail?` — ${d.deadline_detail}`:""}</div>
-                  <div style={{ fontSize:11, color:"#6A5E52" }}>{c?.client_name} · {c?.case_type}</div>
-                </div>
-                {u&&<Avatar user={u} size={22}/>}
-                <DaysLeft date={d.due_date}/>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {reportType==="bystep" && (
-        <div>
-          {Object.keys(byStep).length===0&&<p style={{ color:"#4A3E32" }}>Nenhum caso ativo.</p>}
-          {Object.entries(byStep).map(([step,stepCases])=>(
-            <div key={step} style={{ marginBottom:20 }}>
-              <div style={{ fontSize:12, color:"#C8A96E", fontWeight:700, marginBottom:8, textTransform:"uppercase", letterSpacing:"0.08em" }}>{step} ({stepCases.length})</div>
-              {stepCases.map(c=><CaseRow key={c.id} c={c}/>)}
-            </div>
+    <Modal title="📊 Relatórios" onClose={onClose} maxWidth={720}>
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[["hearings","🏛️ Audiências"],["deadlines","⚠️ Prazos"],["bystep","📋 Por Etapa"]].map(([k,l])=>(
+            <TabBtn key={k} active={tab===k} onClick={()=>setTab(k)}>{l}</TabBtn>
           ))}
         </div>
-      )}
+        <div style={{display:"flex",gap:8}}>
+          <button style={{...Btn("#7EAED4",true),fontSize:12,padding:"6px 12px"}} onClick={()=>{
+            const rows = tab==="hearings"?exportHearings():tab==="deadlines"?urgentDeadlines.map(d=>({Tipo:d.deadline_type,Detalhe:d.deadline_detail||"",Data:fmtDate(d.due_date),"Dias Restantes":daysUntil(d.due_date),Concluído:d.done?"Sim":"Não"})):Object.entries(byStep).flatMap(([step,cs])=>cs.map(c=>({Etapa:step,Cliente:c.client_name,"Tipo de Caso":c.case_type})));
+            exportToCSV(rows,"ImmigrationOS_Relatorio.csv");
+          }}>⬇ Excel/CSV</button>
+          <button style={{...Btn("#E8A090",true),fontSize:12,padding:"6px 12px"}} onClick={()=>{
+            const rows = tab==="hearings"?exportHearings():tab==="deadlines"?urgentDeadlines.map(d=>({Tipo:d.deadline_type,Detalhe:d.deadline_detail||"",Data:fmtDate(d.due_date),"Dias Restantes":String(daysUntil(d.due_date))})):Object.entries(byStep).flatMap(([step,cs])=>cs.map(c=>({Etapa:step,Cliente:c.client_name,"Tipo":c.case_type})));
+            if (rows.length) exportToPDF(tab==="hearings"?"Audiências":tab==="deadlines"?"Prazos Urgentes":"Casos por Etapa", rows);
+          }}>🖨️ PDF</button>
+        </div>
+      </div>
+
+      {tab==="hearings"&&<div>
+        {masterHearings.length>0&&<><div style={{fontSize:12,color:"#7EAED4",fontWeight:700,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>Master Hearings</div>{masterHearings.map(c=><CRow key={c.id+"m"} c={c} dateField="master_hearing_date" dateLabel="Master"/>)}</>}
+        {individualHearings.length>0&&<><div style={{fontSize:12,color:"#E8A090",fontWeight:700,marginBottom:8,marginTop:16,textTransform:"uppercase",letterSpacing:"0.08em"}}>Individual Hearings <span style={{color:"#6A5E52",fontSize:11}}>(alerta 90 dias)</span></div>{individualHearings.map(c=><CRow key={c.id+"i"} c={c} dateField="individual_hearing_date" dateLabel="Individual"/>)}</>}
+        {interviews.length>0&&<><div style={{fontSize:12,color:"#A8C5A0",fontWeight:700,marginBottom:8,marginTop:16,textTransform:"uppercase",letterSpacing:"0.08em"}}>Interviews USCIS</div>{interviews.map(c=><CRow key={c.id+"int"} c={c} dateField="interview_date" dateLabel="Interview"/>)}</>}
+        {!masterHearings.length&&!individualHearings.length&&!interviews.length&&<p style={{color:"#4A3E32"}}>Nenhuma audiência agendada.</p>}
+      </div>}
+
+      {tab==="deadlines"&&<div>
+        {urgentDeadlines.length===0&&<p style={{color:"#4A3E32"}}>Nenhum prazo urgente nos próximos 60 dias.</p>}
+        {urgentDeadlines.map(d=>{
+          const c=cases.find(x=>x.id===d.case_id); const u=users.find(x=>x.id===d.assigned_to);
+          return(
+            <div key={d.id} onClick={()=>{if(c){onOpenCase(c.id);onClose();}}} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"#0F0D0A",borderRadius:8,marginBottom:6,cursor:"pointer"}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700}}>{d.deadline_type}{d.deadline_detail?` — ${d.deadline_detail}`:""}</div>
+                <div style={{fontSize:11,color:"#6A5E52"}}>{c?.client_name} · {c?.case_type}</div>
+              </div>
+              {u&&<Avatar user={u} size={22}/>}
+              <DaysLeft date={d.due_date} warnAt={60}/>
+            </div>
+          );
+        })}
+      </div>}
+
+      {tab==="bystep"&&<div>
+        {Object.keys(byStep).length===0&&<p style={{color:"#4A3E32"}}>Nenhum caso ativo.</p>}
+        {Object.entries(byStep).map(([step,stepCases])=>(
+          <div key={step} style={{marginBottom:20}}>
+            <div style={{fontSize:12,color:"#C8A96E",fontWeight:700,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>{step} ({stepCases.length})</div>
+            {stepCases.map(c=>{const atty=users.find(u=>u.id===c.attorney_id);return(
+              <div key={c.id} onClick={()=>{onOpenCase(c.id);onClose();}} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"#0F0D0A",borderRadius:8,marginBottom:6,cursor:"pointer"}}>
+                <span style={{fontSize:16}}>{CASE_TYPES[c.case_type]?.icon}</span>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700}}>{c.client_name}</div><div style={{fontSize:11,color:"#6A5E52"}}>{c.case_type} · {firstName(atty?.name)}</div></div>
+                <Badge label={c.status} color={statusColors[c.status]||"#C8A96E"}/>
+              </div>
+            );})}
+          </div>
+        ))}
+      </div>}
     </Modal>
   );
 }
@@ -463,27 +540,29 @@ export default function App() {
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [filterAtty, setFilterAtty] = useState(null);
   const [filterStatus, setFilterStatus] = useState(null);
+  const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("info");
   const [showNewCase, setShowNewCase] = useState(false);
   const [showEditCase, setShowEditCase] = useState(false);
-  const [showTransfer, setShowTransfer] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [editFamilyItem, setEditFamilyItem] = useState(null);
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [editNote, setEditNote] = useState(null);
+  const [editDiary, setEditDiary] = useState(null);
   const [noteText, setNoteText] = useState("");
   const [diaryText, setDiaryText] = useState("");
   const [diaryDate, setDiaryDate] = useState(todayStr());
-  const [editNote, setEditNote] = useState(null);
-  const [editDiary, setEditDiary] = useState(null);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskAssignee, setTaskAssignee] = useState("");
   const [taskDue, setTaskDue] = useState("");
-  // Caroline is user 1 by convention — admin
-  const currentUser = users[0];
-  const isAdmin = true; // simplified — in future add real auth
+  const noteInputRef = useRef(null);
+  const diaryInputRef = useRef(null);
+  const taskInputRef = useRef(null);
+  const isAdmin = true;
 
   const loadAll = useCallback(async () => {
     setLoading(true); setConnError(null);
@@ -504,94 +583,89 @@ export default function App() {
 
   useEffect(()=>{loadAll();},[loadAll]);
 
+  const currentUser = users[0];
   const sc = cases.find(c=>c.id===selectedCaseId);
+
+  // Computed
   const caseTasks = id => tasks.filter(t=>t.case_id===id);
   const caseNotes = id => notes.filter(n=>n.case_id===id);
   const caseDiary = id => diary.filter(d=>d.case_id===id);
   const caseFamily = id => family.filter(f=>f.case_id===id);
   const caseDeadlines = id => deadlines.filter(d=>d.case_id===id);
   const pending = tasks.filter(t=>!t.done).map(t=>({...t,clientName:cases.find(c=>c.id===t.case_id)?.client_name,priority:cases.find(c=>c.id===t.case_id)?.priority}));
-  const urgent = cases.filter(c=>c.deadline&&daysUntil(c.deadline)<=14&&!["Encerrado","Arquivado"].includes(c.status));
-  const allHearings = cases.filter(c=>c.master_hearing_date||c.individual_hearing_date||c.interview_date).sort((a,b)=>new Date(a.master_hearing_date||a.individual_hearing_date||a.interview_date)-new Date(b.master_hearing_date||b.individual_hearing_date||b.interview_date));
+  const urgent = deadlines.filter(d=>!d.done&&d.due_date&&daysUntil(d.due_date)<=60);
+  const individualHearingWarning = cases.filter(c=>c.individual_hearing_date&&daysUntil(c.individual_hearing_date)<=90&&!["Encerrado","Arquivado"].includes(c.status));
+  const allHearings = cases.filter(c=>c.master_hearing_date||c.individual_hearing_date||c.interview_date).sort((a,b)=>{const da=a.master_hearing_date||a.individual_hearing_date||a.interview_date;const db=b.master_hearing_date||b.individual_hearing_date||b.interview_date;return new Date(da)-new Date(db);});
   const byUser = users.map(u=>({user:u,tasks:pending.filter(t=>t.assigned_to===u.id)}));
-  const filtered = cases.filter(c=>(!filterAtty||c.attorney_id===filterAtty)&&(!filterStatus||c.status===filterStatus));
 
-  const openCase = id => { setSelectedCaseId(id); setView("case"); setShowAddTask(false); setActiveTab("info"); };
+  // Filter cases
+  const searchLower = search.toLowerCase();
+  const filtered = cases.filter(c=>{
+    const matchSearch = !search || c.client_name.toLowerCase().includes(searchLower) || (c.alien_number||"").toLowerCase().includes(searchLower);
+    const matchAtty = !filterAtty || c.attorney_id===filterAtty;
+    const matchStatus = !filterStatus || c.status===filterStatus;
+    return matchSearch && matchAtty && matchStatus;
+  });
+
+  // Clients list (unique clients from cases)
+  const clientsList = [...new Map(cases.map(c=>([c.client_name, c]))).values()];
+
+  const openCase = id => { setSelectedCaseId(id); setView("case"); setShowAddTask(false); setActiveTab("info"); setNoteText(""); setDiaryText(""); };
 
   const log = async (caseId, action, detail="") => {
-    await supabase.from("audit_log").insert({ case_id:caseId, action, new_value:detail, done_by:currentUser?.id });
+    await supabase.from("audit_log").insert({case_id:caseId,action,new_value:detail,done_by:currentUser?.id}).catch(()=>{});
   };
 
+  // Notes
   const addNote = async caseId => {
     if (!noteText.trim()) return;
     const content = `[${new Date().toLocaleDateString("pt-BR")}] ${noteText}`;
-    const {error} = await supabase.from("notes").insert({case_id:caseId,content,created_by:currentUser?.id});
-    if (!error) { await log(caseId,"Nota adicionada",content); setNoteText(""); loadAll(); }
-    else alert("Erro: "+error.message);
+    await supabase.from("notes").insert({case_id:caseId,content,created_by:currentUser?.id});
+    setNoteText(""); loadAll();
   };
+  const updateNote = async (id,content,caseId) => { await supabase.from("notes").update({content}).eq("id",id); await log(caseId,"Nota editada",content); setEditNote(null); loadAll(); };
+  const deleteNote = async (id,caseId) => { if(!isAdmin){alert("Somente Caroline pode deletar notas.");return;} if(!window.confirm("Deletar nota?"))return; await supabase.from("notes").delete().eq("id",id); await log(caseId,"Nota deletada"); loadAll(); };
 
-  const updateNote = async (noteId, content, caseId) => {
-    await supabase.from("notes").update({content}).eq("id",noteId);
-    await log(caseId,"Nota editada",content);
-    setEditNote(null); loadAll();
-  };
-
-  const deleteNote = async (noteId, caseId) => {
-    if (!window.confirm("Deletar esta nota?")) return;
-    await supabase.from("notes").delete().eq("id",noteId);
-    await log(caseId,"Nota deletada");
-    loadAll();
-  };
-
+  // Diary
   const addDiaryEntry = async caseId => {
     if (!diaryText.trim()) return;
-    const {error} = await supabase.from("case_diary").insert({case_id:caseId,entry_date:diaryDate,content:diaryText,created_by:currentUser?.id});
-    if (!error) { await log(caseId,"Entrada no diário",diaryText); setDiaryText(""); loadAll(); }
-    else alert("Erro: "+error.message);
+    await supabase.from("case_diary").insert({case_id:caseId,entry_date:diaryDate,content:diaryText,created_by:currentUser?.id});
+    setDiaryText(""); loadAll();
   };
+  const updateDiary = async (id,content,caseId) => { await supabase.from("case_diary").update({content}).eq("id",id); setEditDiary(null); loadAll(); };
+  const deleteDiary = async (id,caseId) => { if(!isAdmin){alert("Somente Caroline pode deletar entradas do diário.");return;} if(!window.confirm("Deletar entrada?"))return; await supabase.from("case_diary").delete().eq("id",id); await log(caseId,"Diário deletado"); loadAll(); };
 
-  const updateDiary = async (id, content, caseId) => {
-    await supabase.from("case_diary").update({content}).eq("id",id);
-    await log(caseId,"Diário editado",content);
-    setEditDiary(null); loadAll();
-  };
-
-  const deleteDiary = async (id, caseId) => {
-    if (!isAdmin) { alert("Somente Caroline pode deletar entradas do diário."); return; }
-    if (!window.confirm("Deletar esta entrada do diário?")) return;
-    await supabase.from("case_diary").delete().eq("id",id);
-    await log(caseId,"Entrada do diário deletada");
-    loadAll();
-  };
-
-  const toggleTask = async (taskId, current) => {
-    await supabase.from("tasks").update({done:!current}).eq("id",taskId);
-    setTasks(p=>p.map(t=>t.id===taskId?{...t,done:!current}:t));
-  };
-
-  const deleteTask = async (taskId, caseId) => {
-    if (!window.confirm("Deletar esta tarefa?")) return;
-    await supabase.from("tasks").delete().eq("id",taskId);
-    await log(caseId,"Tarefa deletada");
-    loadAll();
-  };
-
+  // Tasks
+  const toggleTask = async (id,current) => { await supabase.from("tasks").update({done:!current}).eq("id",id); setTasks(p=>p.map(t=>t.id===id?{...t,done:!current}:t)); };
+  const deleteTask = async (id,caseId) => { if(!window.confirm("Deletar tarefa?"))return; await supabase.from("tasks").delete().eq("id",id); await log(caseId,"Tarefa deletada"); loadAll(); };
   const addTask = async caseId => {
     if (!taskTitle.trim()||!taskDue) return;
     await supabase.from("tasks").insert({case_id:caseId,title:taskTitle,assigned_to:Number(taskAssignee||currentUser?.id),done:false,due_date:taskDue});
     setTaskTitle(""); setTaskDue(""); setTaskAssignee(""); setShowAddTask(false); loadAll();
   };
 
-  const updateCase = async (caseId, patch) => {
-    await supabase.from("cases").update(patch).eq("id",caseId);
-    setCases(p=>p.map(c=>c.id===caseId?{...c,...patch}:c));
+  // Cases
+  const updateCase = async (id,patch) => { await supabase.from("cases").update(patch).eq("id",id); setCases(p=>p.map(c=>c.id===id?{...c,...patch}:c)); };
+  const assignWorkflowStep = async (caseId,step,userId) => {
+    const c = cases.find(x=>x.id===caseId);
+    const a = {...(c?.workflow_assignments||{})};
+    if (userId) a[step]=userId; else delete a[step];
+    await updateCase(caseId,{workflow_assignments:a});
   };
 
-  const assignWorkflowStep = async (caseId, step, userId) => {
-    const c = cases.find(x=>x.id===caseId);
-    const assignments = {...(c?.workflow_assignments||{})};
-    if (userId) assignments[step]=userId; else delete assignments[step];
-    await updateCase(caseId,{workflow_assignments:assignments});
+  const handleNewCase = async f => {
+    const id = `C-${new Date().getFullYear()}-${String(cases.length+1).padStart(3,"0")}`;
+    const {error} = await supabase.from("cases").insert({id,client_name:f.clientName.trim(),case_type:f.caseType,attorney_id:Number(f.attorneyId),status:"Em Andamento",priority:f.priority,deadline:f.deadline||null,hearing_date:null,master_hearing_date:f.masterHearing||null,individual_hearing_date:f.individualHearing||null,interview_date:f.interviewDate||null,current_step:0,alien_number:f.alienNumber||null,dob:f.dob||null,nationality:f.nationality||null,passport_number:f.passportNumber||null,us_entry_date:f.usEntryDate||null,ead_eligibility_date:f.eadDate||null,address:f.address||null,phone:f.phone||null,email:f.email||null,workflow_assignments:{}});
+    if (error) { alert("Erro: "+error.message); return; }
+    await supabase.from("notes").insert({case_id:id,content:`[${new Date().toLocaleDateString("pt-BR")}] Caso criado.`,created_by:currentUser?.id});
+    setShowNewCase(false); loadAll();
+  };
+
+  const handleEditCase = async f => {
+    if (!sc) return;
+    await supabase.from("cases").update({client_name:f.clientName.trim(),case_type:f.caseType,attorney_id:Number(f.attorneyId),priority:f.priority,deadline:f.deadline||null,master_hearing_date:f.masterHearing||null,individual_hearing_date:f.individualHearing||null,interview_date:f.interviewDate||null,alien_number:f.alienNumber||null,dob:f.dob||null,nationality:f.nationality||null,passport_number:f.passportNumber||null,us_entry_date:f.usEntryDate||null,ead_eligibility_date:f.eadDate||null,address:f.address||null,phone:f.phone||null,email:f.email||null}).eq("id",sc.id);
+    await log(sc.id,"Caso editado");
+    setShowEditCase(false); loadAll();
   };
 
   const handleTransfer = async (toId, reason) => {
@@ -602,139 +676,37 @@ export default function App() {
     await supabase.from("cases").update({attorney_id:toId}).eq("id",sc.id);
     await supabase.from("transfers").insert({case_id:sc.id,from_attorney:sc.attorney_id,to_attorney:toId,reason});
     await supabase.from("notes").insert({case_id:sc.id,content,created_by:currentUser?.id});
-    await log(sc.id,"Caso transferido",content);
-    setShowTransfer(false); loadAll();
+    setShowTransferModal(false); loadAll();
   };
 
-  const handleNewCase = async f => {
-    const id = `C-${new Date().getFullYear()}-${String(cases.length+1).padStart(3,"0")}`;
-    const {error} = await supabase.from("cases").insert({
-      id, client_name:f.clientName.trim(), case_type:f.caseType,
-      attorney_id:Number(f.attorneyId), status:"Em Andamento", priority:f.priority,
-      deadline:f.deadline||null, hearing_date:f.hearingDate||null,
-      master_hearing_date:f.masterHearing||null, individual_hearing_date:f.individualHearing||null,
-      interview_date:f.interviewDate||null, current_step:0,
-      alien_number:f.alienNumber||null, dob:f.dob||null, nationality:f.nationality||null,
-      passport_number:f.passportNumber||null, us_entry_date:f.usEntryDate||null,
-      ead_eligibility_date:f.eadDate||null, address:f.address||null,
-      phone:f.phone||null, email:f.email||null, workflow_assignments:{},
-    });
-    if (error) { alert("Erro ao salvar:\n"+error.message); return; }
-    await supabase.from("notes").insert({case_id:id,content:`[${new Date().toLocaleDateString("pt-BR")}] Caso criado.`,created_by:currentUser?.id});
-    setShowNewCase(false); loadAll();
-  };
+  const closeCase = async id => { if(!window.confirm("Encerrar este caso?"))return; await supabase.from("cases").update({status:"Encerrado",closed_at:new Date().toISOString()}).eq("id",id); await log(id,"Caso encerrado"); loadAll(); };
+  const deleteCase = async id => { if(!isAdmin){alert("Somente Caroline pode deletar.");return;} if(!window.confirm("Deletar caso permanentemente? Não pode ser desfeito."))return; await supabase.from("notes").delete().eq("case_id",id); await supabase.from("tasks").delete().eq("case_id",id); await supabase.from("case_diary").delete().eq("case_id",id); await supabase.from("family_members").delete().eq("case_id",id); await supabase.from("deadlines").delete().eq("case_id",id); await supabase.from("cases").delete().eq("id",id); setView("cases"); loadAll(); };
 
-  const handleEditCase = async f => {
-    if (!sc) return;
-    const {error} = await supabase.from("cases").update({
-      client_name:f.clientName.trim(), case_type:f.caseType,
-      attorney_id:Number(f.attorneyId), priority:f.priority,
-      deadline:f.deadline||null, hearing_date:f.hearingDate||null,
-      master_hearing_date:f.masterHearing||null, individual_hearing_date:f.individualHearing||null,
-      interview_date:f.interviewDate||null,
-      alien_number:f.alienNumber||null, dob:f.dob||null, nationality:f.nationality||null,
-      passport_number:f.passportNumber||null, us_entry_date:f.usEntryDate||null,
-      ead_eligibility_date:f.eadDate||null, address:f.address||null,
-      phone:f.phone||null, email:f.email||null,
-    }).eq("id",sc.id);
-    if (error) { alert("Erro: "+error.message); return; }
-    await log(sc.id,"Caso editado");
-    setShowEditCase(false); loadAll();
-  };
+  const handleAddFamily = async data => { if(!sc)return; if(editFamilyItem?.id){await supabase.from("family_members").update(data).eq("id",editFamilyItem.id);}else{await supabase.from("family_members").insert({case_id:sc.id,...data});} setShowFamilyModal(false); setEditFamilyItem(null); loadAll(); };
+  const deleteFamily = async (id,caseId) => { if(!window.confirm("Remover familiar?"))return; await supabase.from("family_members").delete().eq("id",id); loadAll(); };
+  const handleAddDeadline = async data => { if(!sc)return; await supabase.from("deadlines").insert({case_id:sc.id,...data}); setShowDeadlineModal(false); loadAll(); };
+  const toggleDeadline = async (id,current) => { await supabase.from("deadlines").update({done:!current}).eq("id",id); setDeadlines(p=>p.map(d=>d.id===id?{...d,done:!current}:d)); };
+  const deleteDeadline = async (id,caseId) => { if(!window.confirm("Deletar prazo?"))return; await supabase.from("deadlines").delete().eq("id",id); loadAll(); };
 
-  const closeCase = async caseId => {
-    if (!window.confirm("Encerrar este caso? Ele ficará como Encerrado.")) return;
-    await supabase.from("cases").update({status:"Encerrado",closed_at:new Date().toISOString()}).eq("id",caseId);
-    await log(caseId,"Caso encerrado");
-    loadAll();
-  };
+  if (loading) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5"}}><div style={{color:"#C8A96E",letterSpacing:"0.3em",fontSize:12}}>IMMIGRATIONOS</div><div style={{color:"#6A5E52"}}>Carregando...</div></div>;
+  if (connError) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5",padding:40}}><div style={{color:"#E07070",fontWeight:700}}>Erro de conexão</div><div style={{color:"#8A7E72",fontSize:13}}>{connError}</div><button style={Btn()} onClick={loadAll}>Tentar novamente</button></div>;
 
-  const deleteCase = async caseId => {
-    if (!isAdmin) { alert("Somente Caroline pode deletar casos."); return; }
-    if (!window.confirm("ATENÇÃO: Deletar este caso permanentemente? Esta ação não pode ser desfeita.")) return;
-    await supabase.from("notes").delete().eq("case_id",caseId);
-    await supabase.from("tasks").delete().eq("case_id",caseId);
-    await supabase.from("case_diary").delete().eq("case_id",caseId);
-    await supabase.from("family_members").delete().eq("case_id",caseId);
-    await supabase.from("deadlines").delete().eq("case_id",caseId);
-    await supabase.from("cases").delete().eq("id",caseId);
-    setView("cases"); loadAll();
-  };
-
-  const handleAddFamily = async data => {
-    if (!sc) return;
-    if (editFamilyItem?.id) {
-      await supabase.from("family_members").update(data).eq("id",editFamilyItem.id);
-      await log(sc.id,"Familiar editado",data.name);
-    } else {
-      await supabase.from("family_members").insert({case_id:sc.id,...data});
-      await log(sc.id,"Familiar adicionado",data.name);
-    }
-    setShowFamilyModal(false); setEditFamilyItem(null); loadAll();
-  };
-
-  const deleteFamily = async (id,caseId) => {
-    if (!window.confirm("Remover este familiar?")) return;
-    await supabase.from("family_members").delete().eq("id",id);
-    await log(caseId,"Familiar removido");
-    loadAll();
-  };
-
-  const handleAddDeadline = async data => {
-    if (!sc) return;
-    await supabase.from("deadlines").insert({case_id:sc.id,...data});
-    await log(sc.id,"Prazo adicionado",data.deadline_type);
-    setShowDeadlineModal(false); loadAll();
-  };
-
-  const toggleDeadline = async (id,current) => {
-    await supabase.from("deadlines").update({done:!current}).eq("id",id);
-    setDeadlines(p=>p.map(d=>d.id===id?{...d,done:!current}:d));
-  };
-
-  const deleteDeadline = async (id,caseId) => {
-    if (!window.confirm("Deletar este prazo?")) return;
-    await supabase.from("deadlines").delete().eq("id",id);
-    await log(caseId,"Prazo deletado");
-    loadAll();
-  };
-
-  const handleAddTeamMember = async data => {
-    await supabase.from("users").insert(data);
-    setShowTeamModal(false); loadAll();
-  };
-
-  const deleteTeamMember = async id => {
-    if (!isAdmin) { alert("Somente Caroline pode remover membros."); return; }
-    if (!window.confirm("Remover este membro da equipe?")) return;
-    await supabase.from("users").delete().eq("id",id);
-    loadAll();
-  };
-
-  // ── STYLES ────────────────────────────────────────────────────────────────
-  const navS = a => ({ padding:"10px 20px", cursor:"pointer", background:a?"#C8A96E18":"transparent", borderLeft:a?"3px solid #C8A96E":"3px solid transparent", color:a?"#C8A96E":"#8A7E72", fontSize:14, fontWeight:a?600:400, display:"flex", alignItems:"center", gap:10 });
-  const th = { textAlign:"left", padding:"11px 14px", color:"#6A5E52", fontSize:11, fontFamily:"monospace", letterSpacing:"0.1em", textTransform:"uppercase", borderBottom:"1px solid #2A2218" };
-  const td = { padding:"12px 14px", borderBottom:"1px solid #1E1A16", fontSize:13, verticalAlign:"middle" };
-
-  if (loading) return <div style={{ minHeight:"100vh", background:"#0F0D0A", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, fontFamily:"sans-serif", color:"#E8E0D5" }}><div style={{ color:"#C8A96E", letterSpacing:"0.3em", fontSize:12 }}>IMMIGRATIONOS</div><div style={{ color:"#6A5E52" }}>Carregando...</div></div>;
-  if (connError) return <div style={{ minHeight:"100vh", background:"#0F0D0A", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, fontFamily:"sans-serif", color:"#E8E0D5", padding:40 }}><div style={{ color:"#E07070", fontWeight:700 }}>Erro de conexão</div><div style={{ color:"#8A7E72", fontSize:13 }}>{connError}</div><button style={B()} onClick={loadAll}>Tentar novamente</button></div>;
-
-  // ── DASHBOARD ─────────────────────────────────────────────────────────────
+  // ── DASHBOARD ────────────────────────────────────────────────────────────
   const Dashboard = () => (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:28, flexWrap:"wrap", gap:12 }}>
-        <div><h1 style={{ fontSize:26, fontWeight:800, margin:0 }}>Dashboard</h1><p style={{ color:"#6A5E52", margin:"4px 0 0", fontSize:13 }}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p></div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button style={G()} onClick={()=>setShowReports(true)}>📊 Relatórios</button>
-          <button style={B()} onClick={()=>setShowNewCase(true)}>+ Novo Caso</button>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:28,flexWrap:"wrap",gap:12}}>
+        <div><h1 style={{fontSize:26,fontWeight:800,margin:0}}>Dashboard</h1><p style={{color:"#6A5E52",margin:"4px 0 0",fontSize:13}}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p></div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={Btn("#6A5E52",true)} onClick={()=>setShowReports(true)}>📊 Relatórios</button>
+          <button style={Btn()} onClick={()=>setShowNewCase(true)}>+ Novo Caso</button>
         </div>
       </div>
-      <div style={{ display:"flex", gap:14, marginBottom:24, flexWrap:"wrap" }}>
-        {[{label:"Casos Ativos",val:cases.filter(c=>c.status==="Em Andamento").length,color:"#C8A96E"},{label:"Tarefas Pend.",val:pending.length,color:"#7EAED4"},{label:"Prazos ≤ 14d",val:urgent.length,color:"#E07070"},{label:"Audiências",val:allHearings.length,color:"#A8C5A0"},{label:"Total de Casos",val:cases.length,color:"#6A5E52"}].map(s=>(
-          <div key={s.label} style={{...CARD,flex:1,minWidth:120,padding:16}}><div style={{fontSize:30,fontWeight:800,color:s.color,fontFamily:"monospace"}}>{s.val}</div><div style={{fontSize:10,color:"#6A5E52",marginTop:4,textTransform:"uppercase",letterSpacing:"0.08em"}}>{s.label}</div></div>
+      <div style={{display:"flex",gap:14,marginBottom:24,flexWrap:"wrap"}}>
+        {[{label:"Casos Ativos",val:cases.filter(c=>c.status==="Em Andamento").length,color:"#C8A96E"},{label:"Tarefas Pend.",val:pending.length,color:"#7EAED4"},{label:"Prazos ≤ 60d",val:urgent.length,color:"#E07070"},{label:"Audiências",val:allHearings.length,color:"#A8C5A0"},{label:"Total de Casos",val:cases.length,color:"#6A5E52"}].map(s=>(
+          <div key={s.label} style={{...CARD,flex:1,minWidth:120,padding:16}}><div style={{fontSize:28,fontWeight:800,color:s.color,fontFamily:"monospace"}}>{s.val}</div><div style={{fontSize:10,color:"#6A5E52",marginTop:4,textTransform:"uppercase",letterSpacing:"0.08em"}}>{s.label}</div></div>
         ))}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1.3fr 1fr", gap:20 }}>
+      <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:20}}>
         <div style={CARD}>
           <h3 style={{margin:"0 0 18px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Tarefas por Membro da Equipe</h3>
           {byUser.map(({user,tasks:ut})=>(
@@ -759,12 +731,18 @@ export default function App() {
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:18}}>
           <div style={CARD}>
-            <h3 style={{margin:"0 0 12px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>⚠️ Prazos Urgentes</h3>
-            {urgent.length===0&&<p style={{color:"#3A3028",fontSize:13}}>Nenhum prazo urgente ✓</p>}
-            {urgent.map(c=>{const atty=users.find(u=>u.id===c.attorney_id);return(
-              <div key={c.id} onClick={()=>openCase(c.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #2A2218",cursor:"pointer"}}>
-                <div><div style={{fontSize:13,fontWeight:600}}>{c.client_name}</div><div style={{fontSize:11,color:"#6A5E52"}}>{CASE_TYPES[c.case_type]?.icon} {c.case_type} · {atty?.name.split(" ")[0]}</div></div>
-                <DaysLeft date={c.deadline}/>
+            <h3 style={{margin:"0 0 12px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>⚠️ Prazos Urgentes (≤ 60 dias)</h3>
+            {urgent.length===0&&individualHearingWarning.length===0&&<p style={{color:"#3A3028",fontSize:13}}>Nenhum prazo urgente ✓</p>}
+            {individualHearingWarning.map(c=>(
+              <div key={c.id+"ih"} onClick={()=>openCase(c.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #2A2218",cursor:"pointer"}}>
+                <div><div style={{fontSize:13,fontWeight:600}}>{c.client_name}</div><div style={{fontSize:11,color:"#E8A090"}}>Individual Hearing ⚠️ 90d</div></div>
+                <DaysLeft date={c.individual_hearing_date} warnAt={90}/>
+              </div>
+            ))}
+            {urgent.slice(0,5).map(d=>{const c=cases.find(x=>x.id===d.case_id);return(
+              <div key={d.id} onClick={()=>c&&openCase(c.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #2A2218",cursor:"pointer"}}>
+                <div><div style={{fontSize:13,fontWeight:600}}>{c?.client_name||"—"}</div><div style={{fontSize:11,color:"#6A5E52"}}>{d.deadline_type}</div></div>
+                <DaysLeft date={d.due_date} warnAt={60}/>
               </div>
             );})}
           </div>
@@ -772,12 +750,12 @@ export default function App() {
             <h3 style={{margin:"0 0 12px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>🏛️ Próximas Audiências</h3>
             {allHearings.length===0&&<p style={{color:"#3A3028",fontSize:13}}>Nenhuma audiência agendada.</p>}
             {allHearings.slice(0,5).map(c=>{
-              const nextDate = c.master_hearing_date||c.individual_hearing_date||c.interview_date;
-              const type = c.master_hearing_date?"Master":c.individual_hearing_date?"Individual":"Interview";
+              const nextDate=c.master_hearing_date||c.individual_hearing_date||c.interview_date;
+              const type=c.master_hearing_date?"Master":c.individual_hearing_date?"Individual":"Interview";
               return(
                 <div key={c.id} onClick={()=>openCase(c.id)} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid #2A2218",cursor:"pointer"}}>
-                  <div><div style={{fontSize:13,fontWeight:600}}>{c.client_name}</div><div style={{fontSize:11,color:"#6A5E52"}}>{type} Hearing · {c.case_type}</div></div>
-                  <div style={{textAlign:"right"}}><div style={{fontSize:11,color:"#A8C5A0",fontFamily:"monospace"}}>{fmtDate(nextDate)}</div><DaysLeft date={nextDate}/></div>
+                  <div><div style={{fontSize:13,fontWeight:600}}>{c.client_name}</div><div style={{fontSize:11,color:"#6A5E52"}}>{type} · {c.case_type}</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:11,color:"#A8C5A0"}}>{fmtDate(nextDate)}</div><DaysLeft date={nextDate} warnAt={type==="Individual"?90:60}/></div>
                 </div>
               );
             })}
@@ -787,43 +765,86 @@ export default function App() {
     </div>
   );
 
+  // ── CLIENTS VIEW ──────────────────────────────────────────────────────────
+  const ClientsView = () => (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:22,flexWrap:"wrap",gap:12}}>
+        <h1 style={{fontSize:26,fontWeight:800,margin:0}}>Clientes</h1>
+        <button style={Btn()} onClick={()=>setShowNewCase(true)}>+ Novo Caso</button>
+      </div>
+      <div style={{marginBottom:16}}>
+        <input type="text" value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar por nome ou sobrenome do cliente..." style={{...I,maxWidth:400}}/>
+      </div>
+      <div style={CARD}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Cliente","A#","Casos","Advogado","Telefone","Email"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+          <tbody>
+            {clientsList.filter(c=>!search||c.client_name.toLowerCase().includes(searchLower)).map(c=>{
+              const atty=users.find(u=>u.id===c.attorney_id);
+              const clientCases=cases.filter(x=>x.client_name===c.client_name);
+              return(
+                <tr key={c.id} onClick={()=>openCase(c.id)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#1E1A16"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <td style={{...TD,fontWeight:600}}>{c.client_name}</td>
+                  <td style={{...TD,fontFamily:"monospace",fontSize:11,color:"#8A7E72"}}>{c.alien_number||"—"}</td>
+                  <td style={TD}>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {clientCases.map(cc=><Badge key={cc.id} label={CASE_TYPES[cc.case_type]?.icon+" "+cc.case_type} color={statusColors[cc.status]||"#C8A96E"}/>)}
+                    </div>
+                  </td>
+                  <td style={TD}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar user={atty} size={20}/><span style={{fontSize:12}}>{firstName(atty?.name)}</span></div></td>
+                  <td style={{...TD,fontSize:12,color:"#8A7E72"}}>{c.phone||"—"}</td>
+                  <td style={{...TD,fontSize:12,color:"#8A7E72"}}>{c.email||"—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   // ── CASES LIST ────────────────────────────────────────────────────────────
   const CasesList = () => (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:22,flexWrap:"wrap",gap:12}}>
         <h1 style={{fontSize:26,fontWeight:800,margin:0}}>Casos <span style={{fontSize:15,color:"#6A5E52",fontWeight:400}}>({filtered.length})</span></h1>
-        <button style={B()} onClick={()=>setShowNewCase(true)}>+ Novo Caso</button>
+        <button style={Btn()} onClick={()=>setShowNewCase(true)}>+ Novo Caso</button>
+      </div>
+      <div style={{marginBottom:12}}>
+        <input type="text" value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Buscar por nome do cliente ou A#..." style={{...I,maxWidth:380}}/>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
-        <button style={{...G(),...(filterAtty===null?{background:"#C8A96E22"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterAtty(null)}>Todos</button>
+        <button style={{...Btn("C8A96E",true),...(filterAtty===null?{background:"#C8A96E22",borderColor:"#C8A96E"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterAtty(null)}>Todos</button>
         {users.filter(u=>u.is_attorney).map(u=>(
-          <button key={u.id} style={{...G(),...(filterAtty===u.id?{background:"#C8A96E22"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterAtty(filterAtty===u.id?null:u.id)}>{u.name.split(" ").slice(-1)[0]}</button>
+          <button key={u.id} style={{...Btn("#C8A96E",true),...(filterAtty===u.id?{background:"#C8A96E22",borderColor:"#C8A96E"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterAtty(filterAtty===u.id?null:u.id)}>{firstName(u.name)}</button>
         ))}
         <div style={{width:1,height:18,background:"#2A2218"}}/>
         {["Em Andamento","Aguardando Cliente","Em Revisão","Aprovado","Encerrado"].map(s=>(
-          <button key={s} style={{...G(),...(filterStatus===s?{background:"#C8A96E22"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterStatus(filterStatus===s?null:s)}>{s}</button>
+          <button key={s} style={{...Btn("#C8A96E",true),...(filterStatus===s?{background:"#C8A96E22",borderColor:"#C8A96E"}:{}),padding:"5px 11px",fontSize:12}} onClick={()=>setFilterStatus(filterStatus===s?null:s)}>{s}</button>
         ))}
       </div>
       <div style={CARD}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>{["ID","Cliente","A#","Tipo","Advogado","Status","Prazo","Audiências","Prog."].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["ID","Cliente","A#","Tipo","Advogado","Status","Prazo","Audiência","Prog.","Tarefas"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
           <tbody>
             {filtered.map(c=>{
               const atty=users.find(u=>u.id===c.attorney_id);
               const cfg=CASE_TYPES[c.case_type];
+              const pend=caseTasks(c.id).filter(t=>!t.done).length;
               const pct=Math.round(((c.current_step+1)/(cfg?.steps.length||1))*100);
               const nextHearing=c.master_hearing_date||c.individual_hearing_date||c.interview_date;
               return(
                 <tr key={c.id} onClick={()=>openCase(c.id)} style={{cursor:"pointer",opacity:["Encerrado","Arquivado"].includes(c.status)?0.5:1}} onMouseEnter={e=>e.currentTarget.style.background="#1E1A16"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                  <td style={{...td,fontFamily:"monospace",fontSize:11,color:"#6A5E52"}}>{c.id}</td>
-                  <td style={{...td,fontWeight:600}}>{c.client_name}</td>
-                  <td style={{...td,fontFamily:"monospace",fontSize:11,color:"#8A7E72"}}>{c.alien_number||"—"}</td>
-                  <td style={td}><span style={{display:"flex",alignItems:"center",gap:5}}><span>{cfg?.icon}</span><span style={{fontSize:12}}>{c.case_type}</span></span></td>
-                  <td style={td}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar user={atty} size={20}/><span style={{fontSize:12}}>{atty?.name.split(" ").slice(-1)[0]||"—"}</span></div></td>
-                  <td style={td}><Badge label={c.status} color={statusColors[c.status]||"#C8A96E"}/></td>
-                  <td style={td}>{c.deadline?<><div style={{fontSize:11,color:"#6A5E52"}}>{fmtDate(c.deadline)}</div><DaysLeft date={c.deadline}/></>:"—"}</td>
-                  <td style={td}>{nextHearing?<><div style={{fontSize:11,color:"#A8C5A0"}}>{fmtDate(nextHearing)}</div><DaysLeft date={nextHearing}/></>:"—"}</td>
-                  <td style={td}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:44,height:4,background:"#2A2218",borderRadius:2,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:cfg?.color||"#C8A96E",borderRadius:2}}/></div><span style={{fontSize:10,fontFamily:"monospace",color:"#6A5E52"}}>{pct}%</span></div></td>
+                  <td style={{...TD,fontFamily:"monospace",fontSize:11,color:"#6A5E52"}}>{c.id}</td>
+                  <td style={{...TD,fontWeight:600}}>{c.client_name}</td>
+                  <td style={{...TD,fontFamily:"monospace",fontSize:11,color:"#8A7E72"}}>{c.alien_number||"—"}</td>
+                  <td style={TD}><span style={{display:"flex",alignItems:"center",gap:5}}><span>{cfg?.icon}</span><span style={{fontSize:11}}>{c.case_type}</span></span></td>
+                  <td style={TD}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar user={atty} size={20}/><span style={{fontSize:12}}>{firstName(atty?.name)}</span></div></td>
+                  <td style={TD}><Badge label={c.status} color={statusColors[c.status]||"#C8A96E"}/></td>
+                  <td style={TD}>{c.deadline?<><div style={{fontSize:11,color:"#6A5E52"}}>{fmtDate(c.deadline)}</div><DaysLeft date={c.deadline} warnAt={60}/></>:"—"}</td>
+                  <td style={TD}>{nextHearing?<><div style={{fontSize:11,color:"#A8C5A0"}}>{fmtDate(nextHearing)}</div><DaysLeft date={nextHearing} warnAt={nextHearing===c.individual_hearing_date?90:60}/></>:"—"}</td>
+                  <td style={TD}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:44,height:4,background:"#2A2218",borderRadius:2,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:cfg?.color||"#C8A96E",borderRadius:2}}/></div><span style={{fontSize:10,fontFamily:"monospace",color:"#6A5E52"}}>{pct}%</span></div></td>
+                  <td style={{...TD,fontFamily:"monospace"}}><span style={{color:pend>0?"#C8A96E":"#A8C5A0"}}>{pend}</span></td>
                 </tr>
               );
             })}
@@ -834,22 +855,19 @@ export default function App() {
   );
 
   // ── CASE DETAIL ───────────────────────────────────────────────────────────
-  const CaseDetail = ({ c }) => {
-    const atty = users.find(u=>u.id===c.attorney_id);
-    const cfg = CASE_TYPES[c.case_type];
-    const ct = caseTasks(c.id);
-    const cn = caseNotes(c.id);
-    const cd = caseDiary(c.id);
-    const cf = caseFamily(c.id);
-    const cdl = caseDeadlines(c.id);
-    const diaryByDate = cd.reduce((acc,e)=>{if(!acc[e.entry_date])acc[e.entry_date]=[];acc[e.entry_date].push(e);return acc;},{});
-    const clientFields = [["A# (Alien Number)",c.alien_number],["Data de Nascimento",c.dob?fmtDate(c.dob):null],["Nacionalidade",c.nationality],["Passaporte",c.passport_number],["Entrada nos EUA",c.us_entry_date?fmtDate(c.us_entry_date):null],["Elegibilidade EAD",c.ead_eligibility_date?fmtDate(c.ead_eligibility_date):null],["Endereço",c.address],["Telefone",c.phone],["Email",c.email]].filter(([,v])=>v);
+  const CaseDetail = ({c}) => {
+    const atty=users.find(u=>u.id===c.attorney_id);
+    const cfg=CASE_TYPES[c.case_type];
+    const ct=caseTasks(c.id); const cn=caseNotes(c.id);
+    const cd=caseDiary(c.id); const cf=caseFamily(c.id);
+    const cdl=caseDeadlines(c.id);
+    const diaryByDate=cd.reduce((acc,e)=>{if(!acc[e.entry_date])acc[e.entry_date]=[];acc[e.entry_date].push(e);return acc;},{});
+    const clientFields=[["A# (Alien Number)",c.alien_number],["Data de Nascimento",c.dob?fmtDate(c.dob):null],["Nacionalidade",c.nationality],["Passaporte",c.passport_number],["Entrada nos EUA",c.us_entry_date?fmtDate(c.us_entry_date):null],["Elegibilidade EAD",c.ead_eligibility_date?fmtDate(c.ead_eligibility_date):null],["Endereço",c.address],["Telefone",c.phone],["Email",c.email]].filter(([,v])=>v);
 
     return (
       <div>
-        {/* HEADER */}
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
-          <button style={G()} onClick={()=>setView("cases")}>← Voltar</button>
+          <button style={Btn("#6A5E52",true)} onClick={()=>setView("cases")}>← Voltar</button>
           <span style={{fontSize:20}}>{cfg?.icon}</span>
           <h1 style={{margin:0,fontSize:20,fontWeight:800}}>{c.client_name}</h1>
           <Badge label={c.id} color="#4A3E32"/>
@@ -860,51 +878,40 @@ export default function App() {
             <select style={{...I,width:"auto",fontSize:12,padding:"7px 10px"}} value={c.status} onChange={e=>updateCase(c.id,{status:e.target.value})}>
               {["Em Andamento","Aguardando Cliente","Em Revisão","Aprovado","Encerrado","Arquivado"].map(s=><option key={s}>{s}</option>)}
             </select>
-            <button style={{...G()}} onClick={()=>setShowEditCase(true)}>✏️ Editar</button>
-            <button style={{...G("#B08FD4"),borderColor:"#B08FD444",color:"#B08FD4"}} onClick={()=>setShowTransfer(true)}>⇄ Transferir</button>
-            {!["Encerrado","Arquivado"].includes(c.status)&&<button style={{...G("#E8A090"),borderColor:"#E8A09044",color:"#E8A090"}} onClick={()=>closeCase(c.id)}>🔒 Encerrar</button>}
-            {isAdmin&&<button style={{...G("#E07070"),borderColor:"#E0707044",color:"#E07070"}} onClick={()=>deleteCase(c.id)}>🗑️ Deletar</button>}
+            <button style={Btn("#C8A96E",true)} onClick={()=>setShowEditCase(true)}>✏️ Editar</button>
+            <button style={{...Btn("#B08FD4",true),borderColor:"#B08FD444",color:"#B08FD4"}} onClick={()=>setShowTransferModal(true)}>⇄ Transferir</button>
+            {!["Encerrado","Arquivado"].includes(c.status)&&<button style={{...Btn("#E8A090",true),borderColor:"#E8A09044",color:"#E8A090"}} onClick={()=>closeCase(c.id)}>🔒 Encerrar</button>}
+            {isAdmin&&<button style={{...Btn("#E07070",true),borderColor:"#E0707044",color:"#E07070"}} onClick={()=>deleteCase(c.id)}>🗑️</button>}
           </div>
         </div>
-
-        {/* TABS */}
         <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
           {[["info","📋 Caso"],["client","👤 Cliente"],["family","👨‍👩‍👧 Familiares"+(cf.length>0?` (${cf.length})`:"")],["deadlines","⚠️ Prazos"+(cdl.filter(d=>!d.done).length>0?` (${cdl.filter(d=>!d.done).length})`:"")],["diary","📓 Diário"+(cd.length>0?` (${cd.length})`:"")],["notes","📝 Notas"],["tasks","✅ Tarefas"+(ct.filter(t=>!t.done).length>0?` (${ct.filter(t=>!t.done).length})`:"")],["workflow","🔄 Workflow"]].map(([tab,label])=>(
             <TabBtn key={tab} active={activeTab===tab} onClick={()=>setActiveTab(tab)}>{label}</TabBtn>
           ))}
         </div>
 
-        {/* INFO */}
         {activeTab==="info"&&<div style={CARD}>
           <h3 style={{margin:"0 0 14px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Informações do Caso</h3>
-          {[
-            ["Advogado",<div style={{display:"flex",alignItems:"center",gap:8}}><Avatar user={atty} size={20}/><span>{atty?.name||"Não atribuído"}</span></div>],
-            ["Prazo Final",c.deadline?<><span style={{fontSize:12}}>{fmtDate(c.deadline)}</span> <DaysLeft date={c.deadline}/>:</>:"—"],
-            ["Master Hearing",c.master_hearing_date?<><span style={{fontSize:12}}>{fmtDate(c.master_hearing_date)}</span> <DaysLeft date={c.master_hearing_date}/>:</>:"—"],
-            ["Individual Hearing",c.individual_hearing_date?<><span style={{fontSize:12}}>{fmtDate(c.individual_hearing_date)}</span> <DaysLeft date={c.individual_hearing_date}/>:</>:"—"],
-            ["Interview USCIS",c.interview_date?<><span style={{fontSize:12}}>{fmtDate(c.interview_date)}</span> <DaysLeft date={c.interview_date}/>:</>:"—"],
-            ["Aberto em",fmtDate(c.created_at)],
-            ["Encerrado em",c.closed_at?fmtDate(c.closed_at):"—"],
-          ].map(([k,v])=>(
+          {[["Advogado",<div style={{display:"flex",alignItems:"center",gap:8}}><Avatar user={atty} size={20}/><span>{atty?.name||"Não atribuído"}</span></div>],["Status",<Badge label={c.status} color={statusColors[c.status]||"#C8A96E"}/>],["Prazo Final",c.deadline?<><span style={{fontSize:12}}>{fmtDate(c.deadline)}</span> <DaysLeft date={c.deadline} warnAt={60}/>:</>:"Sem prazo definido"],["Master Hearing",c.master_hearing_date?<><span style={{fontSize:12}}>{fmtDate(c.master_hearing_date)}</span> <DaysLeft date={c.master_hearing_date} warnAt={60}/>:</>:"—"],["Individual Hearing",c.individual_hearing_date?<><span style={{fontSize:12}}>{fmtDate(c.individual_hearing_date)}</span> <DaysLeft date={c.individual_hearing_date} warnAt={90}/>:</>:"—"],["Interview USCIS",c.interview_date?<><span style={{fontSize:12}}>{fmtDate(c.interview_date)}</span> <DaysLeft date={c.interview_date} warnAt={60}/>:</>:"—"],["Aberto em",fmtDate(c.created_at)],["Encerrado em",c.closed_at?fmtDate(c.closed_at):"—"]].map(([k,v])=>(
             <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #1E1A16",fontSize:13}}><span style={{color:"#6A5E52"}}>{k}</span><span>{v}</span></div>
           ))}
         </div>}
 
-        {/* CLIENT */}
         {activeTab==="client"&&<div style={CARD}>
-          <h3 style={{margin:"0 0 14px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Dados do Cliente</h3>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h3 style={{margin:0,fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Dados do Cliente</h3>
+            <button style={{...Btn("#C8A96E",true),fontSize:12}} onClick={()=>setShowEditCase(true)}>✏️ Editar</button>
+          </div>
           {clientFields.length===0&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhum dado adicional. Clique em Editar para adicionar.</p>}
           {clientFields.map(([k,v])=>(
             <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"9px 0",borderBottom:"1px solid #1E1A16",fontSize:13}}><span style={{color:"#6A5E52",flexShrink:0,marginRight:12}}>{k}</span><span style={{textAlign:"right",wordBreak:"break-all"}}>{v}</span></div>
           ))}
-          <button style={{...G(),marginTop:14,fontSize:12}} onClick={()=>setShowEditCase(true)}>✏️ Editar dados do cliente</button>
         </div>}
 
-        {/* FAMILY */}
         {activeTab==="family"&&<div style={CARD}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <h3 style={{margin:0,fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Familiares no Caso</h3>
-            <button style={{...G(),fontSize:12,padding:"6px 14px"}} onClick={()=>{setEditFamilyItem(null);setShowFamilyModal(true);}}>+ Adicionar Familiar</button>
+            <button style={{...Btn("#C8A96E",true),fontSize:12}} onClick={()=>{setEditFamilyItem(null);setShowFamilyModal(true);}}>+ Adicionar</button>
           </div>
           {cf.length===0&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhum familiar cadastrado.</p>}
           {cf.map(fm=>(
@@ -923,18 +930,16 @@ export default function App() {
                 {fm.alien_number&&<span>A#: <span style={{color:"#E8E0D5"}}>{fm.alien_number}</span></span>}
                 {fm.dob&&<span>Nasc.: <span style={{color:"#E8E0D5"}}>{fmtDate(fm.dob)}</span></span>}
                 {fm.nationality&&<span>Nac.: <span style={{color:"#E8E0D5"}}>{fm.nationality}</span></span>}
-                {fm.passport_number&&<span>Pass.: <span style={{color:"#E8E0D5"}}>{fm.passport_number}</span></span>}
               </div>
               {fm.notes&&<div style={{marginTop:8,fontSize:12,color:"#8A7E72",fontStyle:"italic"}}>{fm.notes}</div>}
             </div>
           ))}
         </div>}
 
-        {/* DEADLINES */}
         {activeTab==="deadlines"&&<div style={CARD}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <h3 style={{margin:0,fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Prazos Urgentes</h3>
-            <button style={{...G(),fontSize:12,padding:"6px 14px"}} onClick={()=>setShowDeadlineModal(true)}>+ Adicionar Prazo</button>
+            <button style={{...Btn("#C8A96E",true),fontSize:12}} onClick={()=>setShowDeadlineModal(true)}>+ Adicionar Prazo</button>
           </div>
           {cdl.length===0&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhum prazo cadastrado.</p>}
           {cdl.map(d=>{const u=users.find(x=>x.id===d.assigned_to);return(
@@ -947,39 +952,34 @@ export default function App() {
                 <div style={{fontSize:11,color:"#6A5E52"}}>{fmtDate(d.due_date)}</div>
               </div>
               {u&&<Avatar user={u} size={22}/>}
-              <DaysLeft date={d.due_date}/>
-              <button onClick={()=>deleteDeadline(d.id,c.id)} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:14,padding:"0 4px"}}>🗑️</button>
+              <DaysLeft date={d.due_date} warnAt={60}/>
+              <button onClick={()=>deleteDeadline(d.id,c.id)} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:14}}>🗑️</button>
             </div>
           );})}
         </div>}
 
-        {/* DIARY */}
         {activeTab==="diary"&&<div style={CARD}>
           <h3 style={{margin:"0 0 16px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>📓 Diário do Caso</h3>
           <div style={{background:"#0F0D0A",borderRadius:10,padding:16,marginBottom:20}}>
-            <div style={{display:"flex",gap:10,marginBottom:10}}>
-              <div><label style={L}>Data</label><input type="date" value={diaryDate} onChange={e=>setDiaryDate(e.target.value)} style={{...I,width:160}}/></div>
-            </div>
+            <div style={{marginBottom:10}}><label style={L}>Data</label><input type="date" value={diaryDate} onChange={e=>setDiaryDate(e.target.value)} style={{...I,width:180}}/></div>
             <label style={L}>Entrada</label>
-            <textarea value={diaryText} onChange={e=>setDiaryText(e.target.value)} placeholder="Registre o que aconteceu nesta data..." style={{...I,minHeight:90,resize:"vertical",marginBottom:10}}/>
-            <button style={B()} onClick={()=>addDiaryEntry(c.id)}>Salvar no Diário</button>
+            <textarea ref={diaryInputRef} defaultValue={diaryText} onChange={e=>setDiaryText(e.target.value)} placeholder="Registre o que aconteceu nesta data..." style={{...I,minHeight:90,resize:"vertical",marginBottom:10}}/>
+            <button style={Btn()} onClick={()=>addDiaryEntry(c.id)}>Salvar no Diário</button>
           </div>
           {Object.keys(diaryByDate).length===0&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhuma entrada ainda.</p>}
           {Object.entries(diaryByDate).map(([date,entries])=>(
             <div key={date} style={{marginBottom:20}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                <div style={{height:1,flex:1,background:"#2A2218"}}/>
-                <span style={{fontSize:12,fontFamily:"monospace",color:"#C8A96E",fontWeight:700}}>{fmtDate(date)}</span>
-                <div style={{height:1,flex:1,background:"#2A2218"}}/>
+                <div style={{height:1,flex:1,background:"#2A2218"}}/><span style={{fontSize:12,fontFamily:"monospace",color:"#C8A96E",fontWeight:700}}>{fmtDate(date)}</span><div style={{height:1,flex:1,background:"#2A2218"}}/>
               </div>
               {entries.map(entry=>(
                 <div key={entry.id} style={{marginBottom:8}}>
                   {editDiary?.id===entry.id?(
                     <div style={{display:"flex",gap:8}}>
-                      <textarea value={editDiary.content} onChange={e=>setEditDiary({...editDiary,content:e.target.value})} style={{...I,flex:1,minHeight:70,resize:"vertical"}}/>
+                      <textarea defaultValue={editDiary.content} onChange={e=>setEditDiary({...editDiary,content:e.target.value})} style={{...I,flex:1,minHeight:70,resize:"vertical"}} autoFocus/>
                       <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        <button style={{...B(),fontSize:12,padding:"6px 12px"}} onClick={()=>updateDiary(entry.id,editDiary.content,c.id)}>✓</button>
-                        <button style={{...G(),fontSize:12,padding:"6px 12px"}} onClick={()=>setEditDiary(null)}>✕</button>
+                        <button style={{...Btn(),fontSize:12,padding:"6px 12px"}} onClick={()=>updateDiary(entry.id,editDiary.content,c.id)}>✓</button>
+                        <button style={{...Btn("#6A5E52",true),fontSize:12,padding:"6px 12px"}} onClick={()=>setEditDiary(null)}>✕</button>
                       </div>
                     </div>
                   ):(
@@ -997,7 +997,6 @@ export default function App() {
           ))}
         </div>}
 
-        {/* NOTES */}
         {activeTab==="notes"&&<div style={CARD}>
           <h3 style={{margin:"0 0 14px",fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Notas & Histórico</h3>
           <div style={{maxHeight:360,overflowY:"auto",marginBottom:14}}>
@@ -1005,10 +1004,10 @@ export default function App() {
               <div key={i} style={{marginBottom:8}}>
                 {editNote?.id===n.id?(
                   <div style={{display:"flex",gap:8}}>
-                    <textarea value={editNote.content} onChange={e=>setEditNote({...editNote,content:e.target.value})} style={{...I,flex:1,minHeight:60,resize:"vertical"}}/>
+                    <textarea defaultValue={editNote.content} onChange={e=>setEditNote({...editNote,content:e.target.value})} style={{...I,flex:1,minHeight:60,resize:"vertical"}} autoFocus/>
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                      <button style={{...B(),fontSize:12,padding:"6px 12px"}} onClick={()=>updateNote(n.id,editNote.content,c.id)}>✓</button>
-                      <button style={{...G(),fontSize:12,padding:"6px 12px"}} onClick={()=>setEditNote(null)}>✕</button>
+                      <button style={{...Btn(),fontSize:12,padding:"6px 12px"}} onClick={()=>updateNote(n.id,editNote.content,c.id)}>✓</button>
+                      <button style={{...Btn("#6A5E52",true),fontSize:12,padding:"6px 12px"}} onClick={()=>setEditNote(null)}>✕</button>
                     </div>
                   </div>
                 ):(
@@ -1025,26 +1024,25 @@ export default function App() {
             {cn.length===0&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhuma nota ainda.</p>}
           </div>
           <div style={{display:"flex",gap:8}}>
-            <input style={I} placeholder="Adicionar nota... (Enter para salvar)" value={noteText} onChange={e=>setNoteText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addNote(c.id)}/>
-            <button style={B()} onClick={()=>addNote(c.id)}>+</button>
+            <input ref={noteInputRef} type="text" defaultValue={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="Adicionar nota... (Enter para salvar)" onKeyDown={e=>e.key==="Enter"&&addNote(c.id)} style={I}/>
+            <button style={Btn()} onClick={()=>addNote(c.id)}>+</button>
           </div>
         </div>}
 
-        {/* TASKS */}
         {activeTab==="tasks"&&<div style={CARD}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <h3 style={{margin:0,fontSize:12,textTransform:"uppercase",letterSpacing:"0.1em",color:"#6A5E52"}}>Tarefas ({ct.filter(t=>!t.done).length} pendentes)</h3>
-            <button style={{...G(),fontSize:12,padding:"6px 12px"}} onClick={()=>setShowAddTask(!showAddTask)}>+ Tarefa</button>
+            <button style={{...Btn("#C8A96E",true),fontSize:12,padding:"6px 12px"}} onClick={()=>setShowAddTask(!showAddTask)}>+ Tarefa</button>
           </div>
           {showAddTask&&<div style={{background:"#0F0D0A",borderRadius:8,padding:12,marginBottom:12}}>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <input style={{...I,flex:2,minWidth:180}} placeholder="Título da tarefa..." value={taskTitle} onChange={e=>setTaskTitle(e.target.value)}/>
-              <select style={{...I,flex:1,minWidth:130}} value={taskAssignee} onChange={e=>setTaskAssignee(e.target.value)}>
+              <input ref={taskInputRef} type="text" defaultValue={taskTitle} onChange={e=>setTaskTitle(e.target.value)} placeholder="Título da tarefa..." style={{...I,flex:2,minWidth:180}} autoFocus/>
+              <select value={taskAssignee} onChange={e=>setTaskAssignee(e.target.value)} style={{...I,flex:1,minWidth:120}}>
                 <option value="">Responsável...</option>
-                {users.map(u=><option key={u.id} value={u.id}>{u.name.split(" ")[0]}</option>)}
+                {users.map(u=><option key={u.id} value={u.id}>{firstName(u.name)}</option>)}
               </select>
-              <input type="date" style={{...I,flex:1,minWidth:130}} value={taskDue} onChange={e=>setTaskDue(e.target.value)}/>
-              <button style={B()} onClick={()=>addTask(c.id)}>Salvar</button>
+              <input type="date" value={taskDue} onChange={e=>setTaskDue(e.target.value)} style={{...I,flex:1,minWidth:130}}/>
+              <button style={Btn()} onClick={()=>addTask(c.id)}>Salvar</button>
             </div>
           </div>}
           {ct.length===0&&!showAddTask&&<p style={{color:"#4A3E32",fontSize:13}}>Nenhuma tarefa ainda.</p>}
@@ -1054,35 +1052,27 @@ export default function App() {
                 {task.done&&<span style={{color:"#A8C5A0",fontSize:11}}>✓</span>}
               </div>
               <span style={{flex:1,fontSize:13,textDecoration:task.done?"line-through":"none"}}>{task.title}</span>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><Avatar user={tu} size={20}/><span style={{fontSize:12,color:"#8A7E72"}}>{tu?.name.split(" ")[0]}</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><Avatar user={tu} size={20}/><span style={{fontSize:12,color:"#8A7E72"}}>{firstName(tu?.name)}</span></div>
               {task.due_date&&<DaysLeft date={task.due_date}/>}
-              <button onClick={()=>deleteTask(task.id,c.id)} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:14,padding:"0 4px"}}>🗑️</button>
+              <button onClick={()=>deleteTask(task.id,c.id)} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:14}}>🗑️</button>
             </div>
           );})}
         </div>}
 
-        {/* WORKFLOW */}
         {activeTab==="workflow"&&<div style={CARD}>
           <WorkflowTracker
-            caseType={c.case_type}
-            currentStep={c.current_step||0}
-            assignments={c.workflow_assignments||{}}
-            users={users}
-            notes={cn}
-            currentUser={currentUser}
+            caseType={c.case_type} currentStep={c.current_step||0}
+            assignments={c.workflow_assignments||{}} users={users} notes={cn}
             onStepChange={step=>updateCase(c.id,{current_step:step})}
             onAssign={(step,userId)=>assignWorkflowStep(c.id,step,userId)}
+            onReorder={async steps=>{ await updateCase(c.id,{custom_workflow:JSON.stringify(steps)}); }}
+            onAddStep={async steps=>{ await updateCase(c.id,{custom_workflow:JSON.stringify(steps)}); }}
             onAddNote={async text=>{
               const content=`[${new Date().toLocaleDateString("pt-BR")}] ${text}`;
               await supabase.from("notes").insert({case_id:c.id,content,created_by:currentUser?.id});
-              await log(c.id,"Nota de workflow adicionada",content);
               loadAll();
             }}
           />
-          <div style={{display:"flex",gap:10,marginTop:16}}>
-            <button style={{...G(),fontSize:12}} disabled={!c.current_step} onClick={()=>updateCase(c.id,{current_step:Math.max(0,(c.current_step||0)-1)})}>← Etapa Anterior</button>
-            <button style={{...B(),fontSize:12}} disabled={(c.current_step||0)>=(CASE_TYPES[c.case_type]?.steps.length-1)} onClick={()=>updateCase(c.id,{current_step:Math.min(CASE_TYPES[c.case_type].steps.length-1,(c.current_step||0)+1)})}>Próxima Etapa →</button>
-          </div>
         </div>}
       </div>
     );
@@ -1093,7 +1083,7 @@ export default function App() {
     <div>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:22}}>
         <h1 style={{fontSize:26,fontWeight:800,margin:0}}>Equipe</h1>
-        <button style={B()} onClick={()=>setShowTeamModal(true)}>+ Adicionar Membro</button>
+        <button style={Btn()} onClick={()=>setShowTeamModal(true)}>+ Adicionar Membro</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>
         {users.map(u=>(
@@ -1105,7 +1095,7 @@ export default function App() {
               <Badge label={u.role} color={u.is_attorney?"#C8A96E":"#7EAED4"}/>
             </div>
             {isAdmin&&u.id!==currentUser?.id&&(
-              <button onClick={()=>deleteTeamMember(u.id)} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:16}}>🗑️</button>
+              <button onClick={async()=>{if(!window.confirm("Remover?"))return;await supabase.from("users").delete().eq("id",u.id);loadAll();}} style={{background:"transparent",border:"none",color:"#E07070",cursor:"pointer",fontSize:16}}>🗑️</button>
             )}
           </div>
         ))}
@@ -1114,66 +1104,59 @@ export default function App() {
   );
 
   // ── TRANSFER MODAL ────────────────────────────────────────────────────────
-  const TransferModal = () => {
-    const [targetId, setTargetId] = useState("");
-    const [reason, setReason] = useState("");
-    if (!sc) return null;
-    return (
-      <Modal title="Transferir Caso" subtitle={`${sc.client_name} · ${sc.case_type}`} onClose={()=>setShowTransfer(false)} maxWidth={440}>
+  const TransferModalComp = () => {
+    const [targetId,setTargetId]=useState(""); const [reason,setReason]=useState("");
+    if(!sc)return null;
+    return(
+      <Modal title="Transferir Caso" subtitle={`${sc.client_name} · ${sc.case_type}`} onClose={()=>setShowTransferModal(false)} maxWidth={440}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div><label style={L}>Transferir para *</label>
             <select value={targetId} onChange={e=>setTargetId(e.target.value)} style={I}>
               <option value="">Selecionar advogado...</option>
-              {users.filter(u=>u.is_attorney&&u.id!==sc.attorney_id).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+              {users.filter(u=>u.is_attorney&&u.id!==sc.attorney_id).map(u=><option key={u.id} value={u.id}>{firstName(u.name)}</option>)}
             </select>
           </div>
           <div><label style={L}>Motivo *</label><textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="Ex: Conflito de agenda..." style={{...I,minHeight:80,resize:"vertical"}}/></div>
           <div style={{display:"flex",gap:10}}>
-            <button style={{...B(),flex:1}} onClick={()=>targetId&&reason&&handleTransfer(Number(targetId),reason)}>Confirmar</button>
-            <button style={{...G(),flex:1}} onClick={()=>setShowTransfer(false)}>Cancelar</button>
+            <button style={{...Btn(),flex:1}} onClick={()=>targetId&&reason&&handleTransfer(Number(targetId),reason)}>Confirmar</button>
+            <button style={{...Btn("#6A5E52",true),flex:1}} onClick={()=>setShowTransferModal(false)}>Cancelar</button>
           </div>
         </div>
       </Modal>
     );
   };
 
-  const isCase = view==="case";
-  const navItems = [{id:"dashboard",icon:"◈",label:"Dashboard"},{id:"cases",icon:"◉",label:"Casos",count:cases.length},{id:"team",icon:"◎",label:"Equipe",count:users.length}];
-
-  return (
+  const isCase=view==="case";
+  return(
     <div style={{minHeight:"100vh",background:"#0F0D0A",fontFamily:"'DM Sans',sans-serif",color:"#E8E0D5"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
-      {/* SIDEBAR */}
       <div style={{position:"fixed",top:0,left:0,width:220,height:"100vh",background:"#1A1410",borderRight:"1px solid #2A2218",display:"flex",flexDirection:"column",padding:"24px 0",zIndex:100}}>
         <div style={{padding:"0 20px 20px",borderBottom:"1px solid #2A2218",marginBottom:10}}>
           <div style={{fontSize:11,fontFamily:"monospace",color:"#C8A96E",letterSpacing:"0.2em",textTransform:"uppercase"}}>ImmigrationOS</div>
           <div style={{fontSize:11,color:"#4A3E32",marginTop:2}}>Case Management</div>
         </div>
-        {navItems.map(item=>(
-          <div key={item.id} style={navS(view===item.id||(isCase&&item.id==="cases"))} onClick={()=>setView(item.id)}>
-            <span>{item.icon}</span><span>{item.label}</span>
-            {item.count!==undefined&&<span style={{marginLeft:"auto",background:"#2A2218",borderRadius:10,padding:"1px 7px",fontSize:11}}>{item.count}</span>}
-          </div>
-        ))}
+        <NavItem active={view==="dashboard"} onClick={()=>setView("dashboard")} icon="◈" label="Dashboard"/>
+        <NavItem active={view==="clients"} onClick={()=>setView("clients")} icon="👥" label="Clientes" count={clientsList.length}/>
+        <NavItem active={view==="cases"||(isCase)} onClick={()=>setView("cases")} icon="◉" label="Casos" count={cases.length}/>
+        <NavItem active={view==="team"} onClick={()=>setView("team")} icon="◎" label="Equipe" count={users.length}/>
         <div style={{marginTop:"auto",padding:"14px 20px",borderTop:"1px solid #2A2218"}}>
           {currentUser&&<div style={{display:"flex",alignItems:"center",gap:8}}><Avatar user={currentUser} size={28}/><div><div style={{fontSize:12,fontWeight:600}}>{currentUser.name}</div><div style={{fontSize:10,color:"#6A5E52"}}>{currentUser.role}</div></div></div>}
         </div>
       </div>
-      {/* MAIN */}
       <div style={{marginLeft:220,padding:"32px 40px",minHeight:"100vh"}}>
         {view==="dashboard"&&<Dashboard/>}
+        {view==="clients"&&<ClientsView/>}
         {view==="cases"&&<CasesList/>}
         {view==="team"&&<TeamView/>}
         {isCase&&sc&&<CaseDetail c={cases.find(c=>c.id===sc.id)}/>}
       </div>
-      {/* MODALS */}
       {showNewCase&&<CaseFormModal users={users} onSave={handleNewCase} onClose={()=>setShowNewCase(false)} title="Novo Caso"/>}
       {showEditCase&&sc&&<CaseFormModal users={users} initial={sc} onSave={handleEditCase} onClose={()=>setShowEditCase(false)} title="Editar Caso"/>}
-      {showTransfer&&<TransferModal/>}
+      {showTransferModal&&<TransferModalComp/>}
       {showFamilyModal&&<FamilyModal initial={editFamilyItem||{}} onSave={handleAddFamily} onClose={()=>{setShowFamilyModal(false);setEditFamilyItem(null);}}/>}
       {showDeadlineModal&&<DeadlineModal users={users} onSave={handleAddDeadline} onClose={()=>setShowDeadlineModal(false)}/>}
-      {showTeamModal&&<TeamMemberModal onSave={handleAddTeamMember} onClose={()=>setShowTeamModal(false)}/>}
-      {showReports&&<ReportsModal cases={cases} users={users} tasks={tasks} deadlines={deadlines} onClose={()=>setShowReports(false)} onOpenCase={openCase}/>}
+      {showTeamModal&&<TeamMemberModal onSave={async d=>{await supabase.from("users").insert(d);setShowTeamModal(false);loadAll();}} onClose={()=>setShowTeamModal(false)}/>}
+      {showReports&&<ReportsModal cases={cases} users={users} deadlines={deadlines} onClose={()=>setShowReports(false)} onOpenCase={openCase}/>}
     </div>
   );
 }
