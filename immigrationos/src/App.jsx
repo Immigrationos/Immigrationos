@@ -648,7 +648,6 @@ export default function App() {
 
   // Loading / error states
   
-  if (!session) return <LoginScreen onLogin={s=>setSession(s)}/>;
   if (loading) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5"}}><div style={{color:"#C8A96E",letterSpacing:"0.3em",fontSize:12}}>IMMIGRATIONOS</div><div style={{color:"#6A5E52"}}>Carregando dados...</div></div>;
   if (connError) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5",padding:40}}><div style={{color:"#E07070",fontWeight:700}}>Erro de conexão</div><div style={{color:"#8A7E72",fontSize:13}}>{connError}</div><button style={Btn()} onClick={loadAll}>Tentar novamente</button></div>;
 
