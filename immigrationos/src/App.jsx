@@ -500,8 +500,6 @@ function AccessLogModal({ logs, users, onClose }) {
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [cases, setCases] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -539,26 +537,8 @@ export default function App() {
   const noteRef = useRef(null);
   const taskRef = useRef(null);
 
-  // ── AUTH ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session); setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (_event === "SIGNED_IN") {
-        // Log the login
-        supabase.from("access_logs").insert({ email: session?.user?.email, event_type: "login" }).then(()=>{});
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    const email = session?.user?.email;
-    await supabase.from("access_logs").insert({ email, event_type: "logout" });
-    await supabase.auth.signOut();
-  };
+  // ── NO AUTH - Direct access ───────────────────────────────────────────────
+  const handleLogout = () => {};
 
   // ── LOAD DATA ─────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
@@ -580,7 +560,7 @@ export default function App() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { if (session) loadAll(); }, [session, loadAll]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   // Current user based on logged in email
   const currentUser = users[0] || null;
@@ -667,7 +647,7 @@ export default function App() {
   const deleteDeadline = async id => { if(!window.confirm("Deletar prazo?"))return; await supabase.from("deadlines").delete().eq("id",id); loadAll(); };
 
   // Loading / error states
-  if (authLoading) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5"}}><div style={{color:"#C8A96E",letterSpacing:"0.3em",fontSize:12}}>IMMIGRATIONOS</div><div style={{color:"#6A5E52"}}>Verificando acesso...</div></div>;
+  
   if (!session) return <LoginScreen onLogin={s=>setSession(s)}/>;
   if (loading) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5"}}><div style={{color:"#C8A96E",letterSpacing:"0.3em",fontSize:12}}>IMMIGRATIONOS</div><div style={{color:"#6A5E52"}}>Carregando dados...</div></div>;
   if (connError) return <div style={{minHeight:"100vh",background:"#0F0D0A",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"sans-serif",color:"#E8E0D5",padding:40}}><div style={{color:"#E07070",fontWeight:700}}>Erro de conexão</div><div style={{color:"#8A7E72",fontSize:13}}>{connError}</div><button style={Btn()} onClick={loadAll}>Tentar novamente</button></div>;
@@ -1104,7 +1084,7 @@ export default function App() {
                 <Avatar user={currentUser} size={28}/>
                 <div><div style={{fontSize:12,fontWeight:600}}>{currentUser.name}</div><div style={{fontSize:10,color:"#6A5E52"}}>{currentUser.role}</div></div>
               </div>
-              <button onClick={handleLogout} style={{...Btn("#E07070",true),fontSize:11,padding:"5px 12px",width:"100%",color:"#E07070"}}>Sair</button>
+
             </div>
           )}
         </div>
