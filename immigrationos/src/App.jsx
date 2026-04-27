@@ -583,8 +583,8 @@ export default function App() {
   useEffect(() => { if (session) loadAll(); }, [session, loadAll]);
 
   // Current user based on logged in email
-  const currentUser = users.find(u => u.auth_email === session?.user?.email) || users[0];
-  const isAdmin = true; // Caroline é a única usuária e sempre admin
+  const currentUser = users[0] || null;
+  const isAdmin = true;
 
   const sc = cases.find(c=>c.id===selectedCaseId);
   const caseTasks = id => tasks.filter(t=>t.case_id===id);
