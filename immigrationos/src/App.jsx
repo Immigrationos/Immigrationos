@@ -36,7 +36,7 @@ const DEADLINE_TYPES = ["Protocolar formulário no USCIS","Call-up para protocol
 const ROLES = ["Advogado(a)","Paralegal","Secretária","Estagiário(a)"];
 const RELATIONSHIPS = ["Cônjuge","Filho(a)","Pai","Mãe","Irmão/Irmã","Avô/Avó","Neto(a)","Outro"];
 const USER_COLORS = ["#C8A96E","#B08FD4","#7EAED4","#A8C5A0","#E8A090","#90C8D4","#D4A870","#C8A0A0"];
-const ADMIN_EMAIL = "caroline@seuescritorio.com"; // ← Caroline é a admin
+const ADMIN_EMAIL = "caroline@seuescritorio.com";
 
 const TODAY = new Date();
 const daysUntil = d => Math.ceil((new Date(d) - TODAY) / 86400000);
@@ -583,8 +583,8 @@ export default function App() {
   useEffect(() => { if (session) loadAll(); }, [session, loadAll]);
 
   // Current user based on logged in email
-  const currentUser = users.find(u => u.auth_email === session?.user?.email) || null;
-  const isAdmin = session?.user?.email === ADMIN_EMAIL || currentUser?.id === 5;
+  const currentUser = users.find(u => u.auth_email === session?.user?.email) || users[0];
+  const isAdmin = true; // Caroline é a única usuária e sempre admin
 
   const sc = cases.find(c=>c.id===selectedCaseId);
   const caseTasks = id => tasks.filter(t=>t.case_id===id);
